@@ -1,0 +1,31 @@
+{
+  "name": "mapy-review-offline-viewer",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Offline companion: Mapy.cz reviews for Peaks of the Balkans",
+  "scripts": {
+    "build": "node scripts/build-all.mjs",
+    "step1": "node scripts/1-buffer.mjs",
+    "step2": "node scripts/2-discover-pois.mjs",
+    "step3": "node scripts/3-fetch-reviews.mjs",
+    "step4": "node scripts/4-download-photos.mjs",
+    "step5": "node scripts/5-translate.mjs",
+    "step6": "node scripts/6-build-tiles.mjs",
+    "step7": "node scripts/7-bundle.mjs",
+    "spike": "node scripts/spike-mapy-api.mjs"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.1",
+    "@turf/buffer": "^7.1.0",
+    "@turf/union": "^7.1.0",
+    "@turf/boolean-point-in-polygon": "^7.1.0",
+    "@turf/nearest-point-on-line": "^7.1.0",
+    "@turf/length": "^7.1.0",
+    "@turf/along": "^7.1.0",
+    "@turf/helpers": "^7.1.0",
+    "sharp": "^0.32.6",
+    "p-limit": "^4.0.0",
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2"
+  }
+}

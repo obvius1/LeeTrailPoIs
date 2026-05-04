@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Peaks POIs">
+  <meta name="theme-color" content="#1a1a2e">
+
+  <title>Peaks of the Balkans — Offline POIs</title>
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- iOS-iconen (optioneel — voeg icon-*.png toe in web/ voor volledig PWA-icoon) -->
+  <link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+
+  <!-- Offline-banner -->
+  <div id="offline-banner">⚡ Je bent offline — alle gecachede data is beschikbaar</div>
+
+  <!-- Header -->
+  <header id="header">
+    <h1>⛰ Peaks <span>POIs</span></h1>
+
+    <!-- Zoekbalk -->
+    <div id="search-wrap">
+      <span id="search-icon">🔍</span>
+      <input id="search" type="search" placeholder="Zoek naam of trefwoord in reviews…" autocomplete="off" autocorrect="off">
+    </div>
+
+    <!-- Categorie-filters -->
+    <div id="filters" role="group" aria-label="Filter op categorie">
+      <button class="chip active" data-cat="all">Alles</button>
+      <button class="chip" data-cat="accommodation">🏕 Slaap</button>
+      <button class="chip" data-cat="water">💧 Water</button>
+      <button class="chip" data-cat="food">🍽 Eten</button>
+      <button class="chip" data-cat="sights">🏔 Zien</button>
+    </div>
+  </header>
+
+  <!-- Statistieken -->
+  <div id="stats">Laden…</div>
+
+  <!-- POI-lijst -->
+  <main>
+    <!-- Laad-indicator -->
+    <div id="loading">
+      <div class="spinner"></div>
+      <span>Data laden…</span>
+    </div>
+
+    <!-- Lijst -->
+    <div id="list" role="list"></div>
+
+    <!-- Geen resultaten -->
+    <div id="no-results" aria-live="polite">
+      <div style="font-size:2rem">🔍</div>
+      <p>Geen locaties gevonden voor deze filter.</p>
+    </div>
+  </main>
+
+  <!-- Detail-weergave (wordt dynamisch gevuld door app.js) -->
+  <div id="detail" role="dialog" aria-modal="true" aria-label="Locatie detail"></div>
+
+  <!-- GPS-knop -->
+  <button id="locate-btn" aria-label="Toon locaties dicht bij mij">📍</button>
+
+  <script src="app.js"></script>
+</body>
+</html>
