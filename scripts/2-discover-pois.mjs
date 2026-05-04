@@ -107,11 +107,10 @@ const seenIds = new Set();
 for (const q of QUERIES) {
   log(`Querying Overpass: ${q.label}…`);
 
-  const query = `
-[out:json][timeout:60];
-${q.filter}(${bbox});
-out center tags;
-`.trim();
+  // [bbox:...] als globale instelling — geldt voor alle statements in de query
+  const query = `[out:json][timeout:60][bbox:${bbox}];
+${q.filter};
+out center tags;`;
 
   let data;
   try {
