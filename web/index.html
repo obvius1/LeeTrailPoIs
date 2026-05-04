@@ -12,6 +12,7 @@
   <title>Peaks of the Balkans — Offline POIs</title>
 
   <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="leaflet.css">
   <link rel="stylesheet" href="style.css">
 
   <!-- iOS-iconen (optioneel — voeg icon-*.png toe in web/ voor volledig PWA-icoon) -->
@@ -32,7 +33,13 @@
       <input id="search" type="search" placeholder="Zoek naam of trefwoord in reviews…" autocomplete="off" autocorrect="off">
     </div>
 
-    <!-- Categorie-filters -->
+    <!-- Weergave-tabs -->
+    <div id="view-tabs">
+      <button class="view-tab active" data-view="list">☰ Lijst</button>
+      <button class="view-tab" data-view="map">🗺 Kaart</button>
+    </div>
+
+    <!-- Categorie-filters (enkel in lijstweergave) -->
     <div id="filters" role="group" aria-label="Filter op categorie">
       <button class="chip active" data-cat="all">Alles</button>
       <button class="chip" data-cat="accommodation">🏕 Slaap</button>
@@ -66,9 +73,15 @@
   <!-- Detail-weergave (wordt dynamisch gevuld door app.js) -->
   <div id="detail" role="dialog" aria-modal="true" aria-label="Locatie detail"></div>
 
+  <!-- Kaartweergave -->
+  <div id="map-view" style="display:none">
+    <div id="map"></div>
+  </div>
+
   <!-- GPS-knop -->
   <button id="locate-btn" aria-label="Toon locaties dicht bij mij">📍</button>
 
+  <script src="leaflet.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

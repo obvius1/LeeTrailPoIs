@@ -14,8 +14,11 @@ const PRECACHE_STATIC = [
   '/index.html',
   '/app.js',
   '/style.css',
+  '/leaflet.min.js',
+  '/leaflet.css',
   '/manifest.webmanifest',
   '/data.json',
+  '/map-tiles.json',
 ];
 
 // ── Install: pre-cache app shell ──────────────────────────────────────────────
@@ -45,7 +48,22 @@ self.addEventListener('install', event => {
           await Promise.allSettled(batch.map(url => cache.add(url).catch(() => {})));
         }
 
-        console.log(`[SW] ${assets.length} assets gecached`);
+        console.log(`[SW] ${assets.length} POI-assets gecached`);
+
+        // Pre-cache kaart-tiles (zoom 12-14, gegenereerd door build)
+        try {
+          const tilesRes = await fetch('/map-tiles.json');
+          const tileUrls = await tilesRes.json();
+          let tilesDone = 0;
+          for (let i = 0; i < tileUrls.length; i += 20) {
+            const batch = tileUrls.slice(i, i + 20);
+            await Promise.allSettled(batch.map(url => cache.add(url).catch(() => {})));
+            tilesDone += batch.length;
+          }
+          console.log(`[SW] ${tilesDone} kaart-tiles gecached`);
+        } catch (err) {
+          console.warn('[SW] Kaart-tiles pre-cachen mislukt (geen internet?):', err.message);
+        }
       } catch (err) {
         console.warn('[SW] Kon assets niet pre-cachen:', err.message);
       }

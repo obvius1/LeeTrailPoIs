@@ -12,6 +12,12 @@ let filtered = [];
 let activeCategory = 'all';
 let searchQuery = '';
 let userLat = null, userLon = null;
+let activeView = 'list';  // 'list' | 'map'
+
+// Leaflet instanties
+let leafletMap = null;
+let userMarker = null;
+let poiMarkers = [];       // { marker, poi } paren
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -24,7 +30,9 @@ async function init() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     allPois = data.pois ?? [];
+    window._routeData = data.route ?? null;
     document.getElementById('loading').style.display = 'none';
+    setupViewTabs();
     setupFilters();
     applyFilters();
     setupSearch();
@@ -281,6 +289,141 @@ window.closeDetail = function() {
   });
 })();
 
+// ── Weergave-tabs ─────────────────────────────────────────────────────────────
+
+function setupViewTabs() {
+  document.querySelectorAll('.view-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeView = btn.dataset.view;
+      document.querySelectorAll('.view-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      const listEl    = document.getElementById('list');
+      const statsEl   = document.getElementById('stats');
+      const filtersEl = document.getElementById('filters');
+      const mapView   = document.getElementById('map-view');
+      const locateBtn = document.getElementById('locate-btn');
+
+      if (activeView === 'map') {
+        listEl.style.display    = 'none';
+        statsEl.style.display   = 'none';
+        filtersEl.style.display = 'none';
+        mapView.style.display   = 'block';
+        locateBtn.style.bottom  = 'calc(var(--safe-bottom) + 20px)';
+        initMap();
+      } else {
+        listEl.style.display    = '';
+        statsEl.style.display   = '';
+        filtersEl.style.display = '';
+        mapView.style.display   = 'none';
+      }
+    });
+  });
+}
+
+// ── Leaflet kaart ─────────────────────────────────────────────────────────────
+
+const CAT_COLORS = {
+  accommodation: '#FF6B35',
+  water:         '#29B6F6',
+  food:          '#E91E63',
+  sights:        '#66BB6A',
+};
+
+function initMap() {
+  if (leafletMap) {
+    // Al geïnitialiseerd — refresh markers voor actieve filter
+    leafletMap.invalidateSize();
+    updateMapMarkers();
+    return;
+  }
+
+  // Centreer op middelpunt van de route
+  const allCoords = window._routeData?.geometry?.coordinates ?? [];
+  const midIdx    = Math.floor(allCoords.length / 2);
+  const center    = allCoords.length > 0
+    ? [allCoords[midIdx][1], allCoords[midIdx][0]]
+    : [42.5, 19.9];
+
+  leafletMap = L.map('map', { zoomControl: true }).setView(center, 12);
+
+  // OSM tiles — worden gecached door service worker na eerste gebruik
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
+    maxZoom: 18,
+    crossOrigin: true,
+  }).addTo(leafletMap);
+
+  // Route tekenen
+  if (window._routeData) {
+    L.geoJSON(window._routeData, {
+      style: { color: '#7c6af5', weight: 3, opacity: 0.85 },
+    }).addTo(leafletMap);
+  }
+
+  updateMapMarkers();
+
+  // Pas kaart aan als GPS al bekend is
+  if (userLat !== null) updateUserMarker(userLat, userLon);
+}
+
+function updateMapMarkers() {
+  if (!leafletMap) return;
+
+  // Verwijder oude markers
+  for (const { marker } of poiMarkers) marker.remove();
+  poiMarkers = [];
+
+  // Voeg gefilterde POIs toe als circle markers
+  for (const poi of allPois) {
+    const color = CAT_COLORS[poi.category] ?? '#9E9E9E';
+
+    const marker = L.circleMarker([poi.lat, poi.lon], {
+      radius: 8,
+      fillColor: color,
+      color: '#fff',
+      weight: 1.5,
+      opacity: 1,
+      fillOpacity: 0.9,
+    }).addTo(leafletMap);
+
+    const starsStr = poi.rating_stars
+      ? `${'★'.repeat(Math.round(poi.rating_stars))} ${poi.rating_stars.toFixed(1)}`
+      : (poi.review_count > 0 ? `${poi.review_count} review${poi.review_count > 1 ? 's' : ''}` : '');
+
+    marker.bindPopup(`
+      <div class="map-popup-name">${esc(poi.name)}</div>
+      <div class="map-popup-meta">
+        ${categoryLabel(poi.category)} · km ${poi.distance_along_route_km}
+        ${starsStr ? `· ${starsStr}` : ''}
+      </div>
+      <button class="map-popup-btn" onclick="openDetail(${poi.osm_id},'${poi.osm_type}')">
+        Bekijk reviews & foto's
+      </button>
+    `, { maxWidth: 220 });
+
+    poiMarkers.push({ marker, poi });
+  }
+}
+
+function updateUserMarker(lat, lon) {
+  if (!leafletMap) return;
+
+  if (userMarker) userMarker.remove();
+
+  // Pulserende blauwe stip voor huidige locatie
+  const icon = L.divIcon({
+    className: '',
+    html: '<div class="location-pulse"></div>',
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  });
+
+  userMarker = L.marker([lat, lon], { icon, zIndexOffset: 1000 })
+    .addTo(leafletMap)
+    .bindPopup('<b>📍 Jij bent hier</b>');
+}
+
 // ── GPS-locatieknop ────────────────────────────────────────────────────────────
 
 function setupLocate() {
@@ -294,10 +437,18 @@ function setupLocate() {
         userLat = pos.coords.latitude;
         userLon = pos.coords.longitude;
         btn.textContent = '📍';
+
+        // Update kaartmarker + zoom naar locatie
+        updateUserMarker(userLat, userLon);
+        if (leafletMap && activeView === 'map') {
+          leafletMap.setView([userLat, userLon], Math.max(leafletMap.getZoom(), 14));
+        }
+
+        // Sorteer lijst op afstand
         applyFilters();
       },
       () => { btn.textContent = '📍'; },
-      { enableHighAccuracy: true, timeout: 8000 }
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   });
 }

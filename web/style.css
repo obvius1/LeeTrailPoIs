@@ -416,6 +416,98 @@ body {
 }
 #locate-btn:active { transform: scale(.92); }
 
+/* ── Weergave-tabs ───────────────────────────────────────────────────────── */
+#view-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.view-tab {
+  flex: 1;
+  padding: 7px 0;
+  border-radius: 8px;
+  border: 1.5px solid var(--bg3);
+  background: transparent;
+  color: var(--text2);
+  font-size: .85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.view-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ── Kaartweergave ───────────────────────────────────────────────────────── */
+#map-view {
+  position: fixed;
+  /* Begint onder de sticky header (~130px) */
+  top: 130px;
+  left: 0; right: 0;
+  bottom: 0;
+  z-index: 10;
+}
+#map {
+  width: 100%;
+  height: 100%;
+}
+
+/* Leaflet popup aanpassen aan dark theme */
+.leaflet-popup-content-wrapper {
+  background: var(--bg2);
+  color: var(--text);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 20px rgba(0,0,0,.5);
+}
+.leaflet-popup-tip { background: var(--bg2); }
+.leaflet-popup-content { margin: 10px 14px; }
+.map-popup-name {
+  font-weight: 700;
+  font-size: .95rem;
+  margin-bottom: 4px;
+}
+.map-popup-meta {
+  font-size: .78rem;
+  color: var(--text2);
+  margin-bottom: 8px;
+}
+.map-popup-btn {
+  display: inline-block;
+  padding: 6px 14px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  font-size: .82rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  width: 100%;
+  text-align: center;
+}
+
+/* Locatie-puls-animatie */
+@keyframes pulse {
+  0%   { transform: scale(1);   opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+.location-pulse {
+  width: 16px; height: 16px;
+  background: #2979ff;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 0 rgba(41,121,255,.5);
+}
+.location-pulse::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: rgba(41,121,255,.3);
+  animation: pulse 1.8s ease-out infinite;
+}
+
 /* ── Loading ──────────────────────────────────────────────────────────────── */
 #loading {
   display: flex;

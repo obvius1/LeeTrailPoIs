@@ -15,17 +15,18 @@
     "spike": "node scripts/spike-mapy-api.mjs"
   },
   "dependencies": {
-    "fast-xml-parser": "^4.5.1",
-    "@turf/buffer": "^7.1.0",
-    "@turf/union": "^7.1.0",
-    "@turf/boolean-point-in-polygon": "^7.1.0",
-    "@turf/nearest-point-on-line": "^7.1.0",
-    "@turf/length": "^7.1.0",
     "@turf/along": "^7.1.0",
+    "@turf/boolean-point-in-polygon": "^7.1.0",
+    "@turf/buffer": "^7.1.0",
     "@turf/helpers": "^7.1.0",
-    "sharp": "^0.32.6",
-    "p-limit": "^4.0.0",
+    "@turf/length": "^7.1.0",
+    "@turf/nearest-point-on-line": "^7.1.0",
+    "@turf/union": "^7.1.0",
     "dotenv": "^16.4.5",
-    "node-fetch": "^3.3.2"
+    "fast-xml-parser": "^4.5.1",
+    "leaflet": "^1.9.4",
+    "node-fetch": "^3.3.2",
+    "p-limit": "^4.0.0",
+    "sharp": "^0.32.6"
   }
 }
