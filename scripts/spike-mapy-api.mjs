@@ -1,210 +1,111 @@
 /**
- * Spike-script: test of de Mapy.cz review-API bereikbaar is.
+ * Spike-script: bevestig dat de Mapy.cz review-API werkt.
  * Gebruik: npm run spike
  *
- * Bevindingen vorige run:
- *  - HTML is SPA-shell (13.500 chars, geen JSON-LD) → HTML-scraping werkt NIET
- *  - GET /api/... → 404  (verkeerde paden)
- *  - GET pro.mapy.cz/... → 405 Method Not Allowed → endpoints BESTAAN maar willen POST + XML-RPC
+ * Bevestigde endpoint (gevonden via DevTools):
+ *   GET https://mapy.com/api/reviews/v1/review/poi/osm/{osm_id}
+ *       ?offset=0&limit=50&lang=en&forceTranslation=true
  *
- * Deze run test:
- *  1. POST + XML-RPC op pro.mapy.cz (FastRPC protocol)
- *  2. Officiële Mapy.com suggest-API voor plaatsinfo
- *  3. Echte OSM-IDs langs de Peaks of the Balkans route
+ * Dit script test die endpoint met echte OSM-IDs langs de Peaks of the Balkans.
+ * Als je groene vinkjes ziet, is stap 3 klaar om de volledige build te draaien.
  */
 
 import { fetchWithRetry, log, ok, warn, sleep } from './utils.mjs';
 
-// ── Echte testlocaties langs de Peaks of the Balkans ─────────────────────────
-// Gevonden via https://www.openstreetmap.org (filter: tourism=camp_site, guest_house)
-// Vervang met jouw eigen bekende plekken als deze IDs niet meer kloppen.
 const TEST_CASES = [
-  {
-    name: 'Guesthouse Gjelaj — Valbona (AL)',
-    osm_type: 'node',
-    osm_id: 5765131862,   // https://www.openstreetmap.org/node/5765131862
-  },
-  {
-    name: 'Camping Theth (AL)',
-    osm_type: 'node',
-    osm_id: 6038484760,   // https://www.openstreetmap.org/node/6038484760
-  },
-  {
-    name: 'Guesthouse Rexhaj — Valbona (AL)',
-    osm_type: 'node',
-    osm_id: 5765131860,   // https://www.openstreetmap.org/node/5765131860
-  },
+  { osm_type: 'node', osm_id: 5765131862, name: 'Guesthouse Gjelaj — Valbona (AL)' },
+  { osm_type: 'node', osm_id: 6038484760, name: 'Camping Theth (AL)' },
+  { osm_type: 'node', osm_id: 5765131860, name: 'Guesthouse Rexhaj — Valbona (AL)' },
 ];
 
-// ── XML-RPC helper ────────────────────────────────────────────────────────────
+const BASE = 'https://mapy.com/api/reviews/v1/review/poi/osm';
+const PARAMS = 'offset=0&limit=50&lang=en&bestReviewsOnly=false&filterByLang=false&forceTranslation=true';
 
-function xmlRpcCall(methodName, params) {
-  const members = Object.entries(params).map(([key, val]) => {
-    const valueTag = typeof val === 'number' && Number.isInteger(val)
-      ? `<i8>${val}</i8>`
-      : `<string>${val}</string>`;
-    return `<member><name>${key}</name><value>${valueTag}</value></member>`;
-  }).join('\n');
+log('═══════════════════════════════════════════════════════');
+log(' Mapy.cz Review API — bevestigingstest                 ');
+log(' Endpoint: GET /api/reviews/v1/review/poi/osm/{id}     ');
+log('═══════════════════════════════════════════════════════\n');
 
-  return `<?xml version="1.0"?><methodCall>
-<methodName>${methodName}</methodName>
-<params><param><value><struct>
-${members}
-</struct></value></param></params>
-</methodCall>`;
-}
-
-async function postXmlRpc(endpoint, methodName, params) {
-  const body = xmlRpcCall(methodName, params);
-  try {
-    const res = await fetchWithRetry(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml',
-        'Accept': 'application/json, text/xml, */*',
-        'Origin': 'https://mapy.com',
-        'Referer': 'https://mapy.com/',
-      },
-      body,
-    });
-    return res;
-  } catch (err) {
-    return { ok: false, status: `ERR: ${err.message}`, text: async () => '' };
-  }
-}
-
-// ── Officiële Mapy.com Suggest-API ────────────────────────────────────────────
-
-async function tryOfficialSuggestApi(name) {
-  const url = `https://api.mapy.com/v1/suggest?lang=en&query=${encodeURIComponent(name)}&type=poi&limit=3`;
-  log(`\n[OFFICIAL SUGGEST] ${url}`);
-  try {
-    const res = await fetchWithRetry(url, { headers: { 'Accept': 'application/json' } });
-    log(`  Status: ${res.status}`);
-    if (res.ok) {
-      const data = await res.json();
-      const items = data.items ?? data.results ?? [];
-      if (items.length > 0) {
-        ok(`  Gevonden: ${items.length} resultaten`);
-        for (const item of items.slice(0, 2)) {
-          log(`  - ${item.name ?? item.label} | source=${item.source ?? '?'} id=${item.id ?? '?'} | ${JSON.stringify(item).slice(0, 120)}`);
-        }
-        return items;
-      } else {
-        log(`  Geen resultaten. Response: ${JSON.stringify(data).slice(0, 200)}`);
-      }
-    }
-  } catch (err) {
-    warn(`  Fout: ${err.message}`);
-  }
-  return [];
-}
-
-// ── Hoofdprogramma ────────────────────────────────────────────────────────────
-
-log('═══════════════════════════════════════════');
-log(' Mapy.cz API Spike v2 — POST + XML-RPC     ');
-log('═══════════════════════════════════════════\n');
-
-// XML-RPC methode-namen om te proberen (educated guesses)
-const REVIEW_METHODS = [
-  'place.getReviews',
-  'place.reviewList',
-  'review.list',
-  'poi.getReviews',
-  'entity.reviews',
-];
-
-const DETAIL_METHODS = [
-  'place.getDetail',
-  'place.detail',
-  'poi.getDetail',
-  'entity.get',
-];
-
-const PRO_ENDPOINTS = [
-  'https://pro.mapy.cz/review',
-  'https://pro.mapy.cz/poi',
-  'https://pro.mapy.cz/poilist',
-  'https://pro.mapy.cz/search',
-];
+let totalOk = 0;
+let totalReviews = 0;
+let totalPhotos = 0;
 
 for (const tc of TEST_CASES) {
-  log(`\n${'─'.repeat(55)}`);
-  log(`Test: ${tc.name}`);
-  log(`OSM: ${tc.osm_type}/${tc.osm_id}`);
-  log(`${'─'.repeat(55)}`);
+  const url = `${BASE}/${tc.osm_id}?${PARAMS}`;
+  log(`\n── ${tc.name}`);
+  log(`   OSM: ${tc.osm_type}/${tc.osm_id}`);
+  log(`   URL: ${url}`);
 
-  const nodeType = tc.osm_type === 'node' ? 'N' : tc.osm_type === 'way' ? 'W' : 'R';
-  const mapy_url = `https://mapy.com/en/place/osm-${nodeType}${tc.osm_id}/`;
+  try {
+    const res = await fetchWithRetry(url, {
+      headers: { 'Referer': 'https://mapy.com/', 'Accept': 'application/json' },
+    });
 
-  // ── Test A: Officiële suggest-API ─────────────────────────────────────────
-  await tryOfficialSuggestApi(tc.name.split('—')[0].trim());
-  await sleep(500);
+    log(`   Status: ${res.status}`);
 
-  // ── Test B: POST + XML-RPC voor details ──────────────────────────────────
-  log('\n[XML-RPC DETAIL] Probeer place.getDetail via POST...');
-  let detailWorked = false;
-  for (const endpoint of PRO_ENDPOINTS) {
-    for (const method of DETAIL_METHODS.slice(0, 2)) {
-      const res = await postXmlRpc(endpoint, method, {
-        source: 'osm',
-        id: tc.osm_id,
-        lang: 'en',
-      });
-      const statusStr = String(res.status);
-      if (res.ok || statusStr === '200') {
-        const text = await res.text();
-        ok(`  ✓ WERKT: ${method} @ ${endpoint}`);
-        log(`  Preview: ${text.slice(0, 300)}`);
-        detailWorked = true;
-        break;
-      } else {
-        log(`  ${statusStr}  ${method} @ ${endpoint.replace('https://pro.mapy.cz', '')}`);
-      }
-      await sleep(200);
+    if (res.status === 404) {
+      warn('   POI niet gevonden op Mapy.cz (OSM-ID bestaat niet in hun database)');
+      log('   → Probeer de ID op te zoeken op openstreetmap.org');
+      continue;
     }
-    if (detailWorked) break;
-  }
 
-  // ── Test C: POST + XML-RPC voor reviews ──────────────────────────────────
-  log('\n[XML-RPC REVIEWS] Probeer review-methodes via POST...');
-  let reviewsWorked = false;
-  for (const endpoint of PRO_ENDPOINTS) {
-    for (const method of REVIEW_METHODS) {
-      const res = await postXmlRpc(endpoint, method, {
-        source: 'osm',
-        id: tc.osm_id,
-        lang: 'en',
-        offset: 0,
-        limit: 10,
-      });
-      const statusStr = String(res.status);
-      if (res.ok || statusStr === '200') {
-        const text = await res.text();
-        ok(`  ✓ WERKT: ${method} @ ${endpoint}`);
-        log(`  Preview: ${text.slice(0, 400)}`);
-        reviewsWorked = true;
-        break;
-      } else {
-        log(`  ${statusStr}  ${method} @ ${endpoint.replace('https://pro.mapy.cz', '')}`);
-      }
-      await sleep(200);
+    if (!res.ok) {
+      warn(`   Onverwachte fout ${res.status}`);
+      continue;
     }
-    if (reviewsWorked) break;
+
+    const data = await res.json();
+    const reviews = data.reviews ?? [];
+    const photos  = reviews.flatMap(r => r.gallery ?? []).filter(g => g.status === 'approved');
+
+    ok(`   ✓ ${data.total ?? reviews.length} review(s) | ` +
+       `${data.review_rating_stars?.toFixed(1) ?? '?'}★ | ` +
+       `${photos.length} foto(s)`);
+
+    // Toon de eerste review als voorbeeld
+    if (reviews.length > 0) {
+      const r = reviews[0];
+      const preview = (r.text ?? '').slice(0, 120);
+      log(`   Voorbeeld [${r.lang?.toUpperCase() ?? '?'} ${r.native ? '(origineel)' : '(vertaald)'}]:`);
+      log(`   "${preview}${preview.length >= 120 ? '…' : ''}"`);
+    }
+
+    // Toon een foto-URL-voorbeeld
+    if (photos.length > 0) {
+      const resolved = photos[0].urls.default
+        .replace('{width}', '800')
+        .replace('{height}', '600');
+      log(`   Foto-voorbeeld: ${resolved}`);
+    }
+
+    totalOk++;
+    totalReviews += data.total ?? reviews.length;
+    totalPhotos  += photos.length;
+
+  } catch (err) {
+    warn(`   Fout: ${err.message}`);
   }
 
-  if (!detailWorked && !reviewsWorked) {
-    warn('  Geen enkel XML-RPC endpoint werkte voor deze POI.');
-  }
-
-  await sleep(1000);
+  await sleep(600);
 }
 
-log('\n═══════════════════════════════════════════');
-log('Als alles 400/404/405 geeft:');
-log('→ DevTools stap (zie SPIKE.md) is nodig.');
-log('→ Stuur de Request URL + eerste 5 regels');
-log('   Response naar Lauren zodat het script');
-log('   bijgewerkt kan worden.');
-log('═══════════════════════════════════════════\n');
+log('\n═══════════════════════════════════════════════════════');
+if (totalOk === TEST_CASES.length) {
+  ok(`Alle ${totalOk}/${TEST_CASES.length} testlocaties bereikbaar ✓`);
+  ok(`Totaal: ${totalReviews} reviews, ${totalPhotos} foto's`);
+  log('\n🚀  Klaar voor de volledige build:');
+  log('   1. Zorg dat data/route.gpx aanwezig is');
+  log('   2. Vul .env in met je MAPY_API_KEY (en optioneel DEEPL_API_KEY)');
+  log('   3. npm run build');
+} else if (totalOk > 0) {
+  warn(`${totalOk}/${TEST_CASES.length} locaties bereikbaar — OSM-IDs controleren voor de rest`);
+  log('De build werkt ook als sommige POIs niet op Mapy.cz staan → worden overgeslagen.');
+} else {
+  warn('Geen enkele locatie bereikbaar.');
+  warn('Mogelijke oorzaken:');
+  warn('  1. Geen internetverbinding');
+  warn('  2. Mapy.cz heeft de endpoint gewijzigd');
+  warn('  3. Rate-limiting / tijdelijke storing');
+  warn('Probeer in een paar minuten opnieuw, of open de URL handmatig in je browser.');
+}
+log('═══════════════════════════════════════════════════════\n');
