@@ -12,6 +12,7 @@ import { join } from 'path';
 import nearestPointOnLine from '@turf/nearest-point-on-line';
 import length from '@turf/length';
 import along from '@turf/along';
+import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import { log, ok, warn, cacheRead, WEB_DIR, ROOT } from './utils.mjs';
 
 mkdirSync(WEB_DIR, { recursive: true });
@@ -115,7 +116,10 @@ try {
 }
 
 // ── Tile-lijst genereren voor offline pre-caching ────────────────────────────
-log('Tile-URLs genereren voor offline pre-caching (zoom 12-14)…');
+log('Tile-URLs genereren voor offline pre-caching (zoom 12-17)…');
+
+// Laad de zoekzone voor polygon-filtering bij hoge zooms
+const searchArea = cacheRead('search-area.geojson');
 
 function latLonToTile(lat, lon, zoom) {
   const n = Math.pow(2, zoom);
@@ -125,30 +129,59 @@ function latLonToTile(lat, lon, zoom) {
   return { x, y };
 }
 
-const tileUrls = [];
-const lats = output.pois.map(p => p.lat).concat(
-  route.geometry.coordinates.map(c => c[1])
-);
-const lons = output.pois.map(p => p.lon).concat(
-  route.geometry.coordinates.map(c => c[0])
-);
-const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+/** Geografisch middelpunt van een tile (lon, lat) */
+function tileCenter(x, y, zoom) {
+  const n = Math.pow(2, zoom);
+  const lon = (x + 0.5) / n * 360 - 180;
+  const latRad = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 0.5) / n)));
+  return [lon, latRad * 180 / Math.PI]; // [lon, lat]
+}
 
-for (const zoom of [12, 13, 14, 15, 16]) {
+const tileUrls = [];
+const routeCoords = route.geometry.coordinates;
+const minLat = Math.min(...routeCoords.map(c => c[1]));
+const maxLat = Math.max(...routeCoords.map(c => c[1]));
+const minLon = Math.min(...routeCoords.map(c => c[0]));
+const maxLon = Math.max(...routeCoords.map(c => c[0]));
+
+const zoomStats = {};
+
+for (const zoom of [12, 13, 14, 15, 16, 17]) {
   const tMin = latLonToTile(maxLat, minLon, zoom); // NW
   const tMax = latLonToTile(minLat, maxLon, zoom); // SE
+
+  // Zoom ≥ 15: filter op zoekzone-polygon voor betere precisie
+  // Zoom 12-14: bbox is voldoende (weinig tiles toch)
+  const usePolygonFilter = zoom >= 15 && searchArea != null;
+
+  let added = 0;
   for (let x = tMin.x; x <= tMax.x; x++) {
     for (let y = tMin.y; y <= tMax.y; y++) {
-      // Verspreid over OSM-subdomains a/b/c
-      const sub = ['a','b','c'][(x + y) % 3];
+      if (usePolygonFilter) {
+        const [lon, lat] = tileCenter(x, y, zoom);
+        const pt = { type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] } };
+        if (!booleanPointInPolygon(pt, searchArea)) continue;
+      }
+      const sub = ['a', 'b', 'c'][(x + y) % 3];
       tileUrls.push(`https://${sub}.tile.openstreetmap.org/${zoom}/${x}/${y}.png`);
+      added++;
     }
   }
+  zoomStats[zoom] = added;
 }
 
 writeFileSync(join(WEB_DIR, 'map-tiles.json'), JSON.stringify(tileUrls));
-log(`  ${tileUrls.length} tiles voor zoom 12-14 (≈${Math.round(tileUrls.length * 15 / 1024)} MB)`);
+
+log(`  Tiles per zoom niveau:`);
+let cumMb = 0;
+for (const [zoom, count] of Object.entries(zoomStats)) {
+  const mb = Math.round(count * 9 / 1024 * 10) / 10; // ~9 KB/tile gemiddeld
+  cumMb += mb;
+  const flag = Number(zoom) >= 15 ? ' ← polygon-gefilterd' : '';
+  log(`    zoom ${zoom}: ${count.toLocaleString()} tiles (~${mb} MB)${flag}`);
+}
+log(`  Totaal: ${tileUrls.length.toLocaleString()} tiles (~${Math.round(cumMb)} MB)`);
+if (!searchArea) warn('  search-area.geojson niet gevonden — bbox gebruikt voor alle zooms');
 
 log('\n🎉  Build klaar! Resultaat staat in web/');
 log('   Deploy via: GitHub Pages, Netlify Drop, of gewoon "npx serve web/"');
