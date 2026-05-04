@@ -50,15 +50,23 @@ self.addEventListener('install', event => {
 
         console.log(`[SW] ${assets.length} POI-assets gecached`);
 
-        // Pre-cache kaart-tiles (zoom 12-14, gegenereerd door build)
+        // Pre-cache kaart-tiles (zoom 12-16, gegenereerd door build)
+        // Laad eerst de lage zooms (snel), dan de hogere in de achtergrond
         try {
           const tilesRes = await fetch('/map-tiles.json');
           const tileUrls = await tilesRes.json();
           let tilesDone = 0;
-          for (let i = 0; i < tileUrls.length; i += 20) {
-            const batch = tileUrls.slice(i, i + 20);
-            await Promise.allSettled(batch.map(url => cache.add(url).catch(() => {})));
+          // Batches van 30 met kleine pauze — beleefd voor OSM-servers
+          for (let i = 0; i < tileUrls.length; i += 30) {
+            const batch = tileUrls.slice(i, i + 30);
+            await Promise.allSettled(batch.map(url =>
+              fetch(url, { cache: 'force-cache' })
+                .then(r => r.ok ? cache.put(url, r) : null)
+                .catch(() => null)
+            ));
             tilesDone += batch.length;
+            // Pauze elke 300 tiles (~10 batches) om throttling te vermijden
+            if (tilesDone % 300 === 0) await new Promise(r => setTimeout(r, 500));
           }
           console.log(`[SW] ${tilesDone} kaart-tiles gecached`);
         } catch (err) {

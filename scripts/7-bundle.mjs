@@ -135,7 +135,7 @@ const lons = output.pois.map(p => p.lon).concat(
 const minLat = Math.min(...lats), maxLat = Math.max(...lats);
 const minLon = Math.min(...lons), maxLon = Math.max(...lons);
 
-for (const zoom of [12, 13, 14]) {
+for (const zoom of [12, 13, 14, 15, 16]) {
   const tMin = latLonToTile(maxLat, minLon, zoom); // NW
   const tMax = latLonToTile(minLat, maxLon, zoom); // SE
   for (let x = tMin.x; x <= tMax.x; x++) {
