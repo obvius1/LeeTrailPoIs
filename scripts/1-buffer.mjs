@@ -11,6 +11,7 @@ import { join } from 'path';
 import { XMLParser } from 'fast-xml-parser';
 import buffer from '@turf/buffer';
 import union from '@turf/union';
+import { featureCollection } from '@turf/helpers';
 import { log, ok, warn, cacheWrite, ROOT, DATA_DIR } from './utils.mjs';
 import 'dotenv/config';
 
@@ -108,7 +109,7 @@ if (existsSync(EXTRA_ZONES_FILE)) {
   if (realFeatures.length > 0) {
     log(`${realFeatures.length} extra zone(s) gevonden, samenvoegen…`);
     for (const zone of realFeatures) {
-      searchArea = union(searchArea, zone) ?? searchArea;
+      searchArea = union(featureCollection([searchArea, zone])) ?? searchArea;
     }
     ok('Extra zones samengevoegd');
   } else {
