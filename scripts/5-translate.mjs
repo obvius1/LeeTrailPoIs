@@ -1,10 +1,12 @@
 /**
- * Stap 5 — Reviews vertalen via DeepL Free API
+ * Stap 5 — Vertalingen afwerken via DeepL Free API
  *
- * Vertaalt review-teksten (Tsjechisch, Sloveens, Albanees, ...) naar Engels.
- * - Gebruikt DeepL Free API (500K tekens/maand gratis)
- * - Cache per tekst-hash → herstart is altijd gratis
- * - Detecteert taal automatisch (DeepL doet dit intern)
+ * Reviews zijn al vertaald door Mapy.cz (forceTranslation=true in stap 3).
+ * DeepL wordt hier enkel nog gebruikt voor OSM-tags die niet in het Engels zijn
+ * (bv. beschrijvingen, opening_hours-tekst, operatornamen in lokale talen).
+ *
+ * Als je geen DeepL key hebt: de stap wordt overgeslagen en alles werkt nog steeds —
+ * enkel OSM-beschrijvingen blijven in de lokale taal.
  *
  * Output: cache/pois-translated.json
  */
@@ -14,43 +16,59 @@ import pLimit from 'p-limit';
 import { log, ok, warn, cacheRead, cacheWrite, cacheExists, fetchWithRetry, sleep } from './utils.mjs';
 import 'dotenv/config';
 
-const DEEPL_API_KEY = process.env.DEEPL_API_KEY;
-const TARGET_LANG = process.env.TRANSLATE_TARGET_LANG ?? 'EN-GB';
-const CONCURRENCY = 3;
-const MAX_CHARS_PER_REQUEST = 4500; // DeepL max per request is 5000
+const DEEPL_API_KEY   = process.env.DEEPL_API_KEY;
+const TARGET_LANG     = process.env.TRANSLATE_TARGET_LANG ?? 'EN-GB';
+const CONCURRENCY     = 3;
 
-// DeepL Free API endpoint (eindigt op :fx in je key)
+// DeepL Free API endpoint (key eindigt op :fx)
 const isFreeKey = DEEPL_API_KEY?.endsWith(':fx');
 const DEEPL_BASE = isFreeKey
   ? 'https://api-free.deepl.com/v2/translate'
   : 'https://api.deepl.com/v2/translate';
 
-if (!DEEPL_API_KEY) {
-  console.error('❌  DEEPL_API_KEY niet ingesteld in .env');
-  console.error('   Registreer op https://www.deepl.com/pro-api (gratis Free-tier)');
+const pois = cacheRead('pois-with-photos.json');
+if (!pois) {
+  console.error('❌  cache/pois-with-photos.json niet gevonden. Voer eerst stap 4 uit.');
   process.exit(1);
+}
+
+// ── Geen DeepL key → alles doorgeven zonder vertaling ────────────────────────
+
+if (!DEEPL_API_KEY) {
+  warn('DEEPL_API_KEY niet ingesteld — OSM-beschrijvingen worden niet vertaald.');
+  warn('Reviews zijn al vertaald door Mapy.cz → app werkt volledig zonder DeepL.');
+  log('Kopieer pois-with-photos.json als pois-translated.json...');
+  cacheWrite('pois-translated.json', pois);
+  ok('Stap 5 overgeslagen (geen DeepL key) — data doorgegeven ✓');
+  process.exit(0);
 }
 
 // ── Vertaal-cache ─────────────────────────────────────────────────────────────
 
 let transCache = cacheExists('translations.json') ? cacheRead('translations.json') : {};
 let newTranslations = 0;
-let totalChars = 0;
 
 function hashText(text) {
   return createHash('md5').update(text).digest('hex').slice(0, 16);
 }
 
+// Detecteer simpele heuristiek: is de tekst waarschijnlijk al Engels?
+function likelyEnglish(text) {
+  if (!text) return true;
+  // Snelle check: bevat veel Engelse stopwoorden?
+  const eng = /\b(the|and|is|of|in|to|a|for|with|at|from|this|that|are|was|it)\b/gi;
+  const matches = (text.match(eng) ?? []).length;
+  return matches >= 2 || text.length < 20;
+}
+
 async function translate(text) {
-  if (!text || text.trim().length < 3) return text;
+  if (!text || text.trim().length < 5) return null;
+  if (likelyEnglish(text)) return null;     // al Engels → niet vertalen
 
   const hash = hashText(text);
-  if (transCache[hash]) return transCache[hash]; // cache hit
+  if (transCache[hash]) return transCache[hash];
 
-  // Knip af op max lengte
-  const trimmed = text.length > MAX_CHARS_PER_REQUEST
-    ? text.slice(0, MAX_CHARS_PER_REQUEST) + '…'
-    : text;
+  const trimmed = text.length > 4500 ? text.slice(0, 4500) + '…' : text;
 
   try {
     const res = await fetchWithRetry(DEEPL_BASE, {
@@ -59,28 +77,20 @@ async function translate(text) {
         'Authorization': `DeepL-Auth-Key ${DEEPL_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        text: [trimmed],
-        target_lang: TARGET_LANG,
-        // source_lang: auto-detect
-      }),
+      body: JSON.stringify({ text: [trimmed], target_lang: TARGET_LANG }),
     });
 
     if (!res.ok) {
-      const body = await res.text();
-      warn(`DeepL fout ${res.status}: ${body.slice(0, 200)}`);
+      warn(`DeepL fout ${res.status}`);
       return null;
     }
 
     const data = await res.json();
     const translated = data.translations?.[0]?.text ?? null;
-
     if (translated) {
       transCache[hash] = translated;
       newTranslations++;
-      totalChars += trimmed.length;
     }
-
     return translated;
   } catch (err) {
     warn(`Vertaalfout: ${err.message}`);
@@ -90,55 +100,36 @@ async function translate(text) {
 
 // ── Hoofdprogramma ────────────────────────────────────────────────────────────
 
-const pois = cacheRead('pois-with-photos.json');
-if (!pois) {
-  console.error('❌  cache/pois-with-photos.json niet gevonden. Voer eerst stap 4 uit.');
-  process.exit(1);
-}
+log('DeepL-vertaling van OSM-beschrijvingen…');
+log('(Reviews zijn al in het Engels dankzij Mapy.cz forceTranslation ✓)');
 
-// Tel hoeveel teksten vertaald moeten worden
-let totalTexts = 0;
-for (const poi of pois) {
-  if (poi.description && !cacheExists('translations.json')) totalTexts++;
-  for (const r of poi.reviews ?? []) {
-    if (r.text && !transCache[hashText(r.text)]) totalTexts++;
-  }
-}
-log(`~${totalTexts} teksten te vertalen via DeepL (${TARGET_LANG})…`);
-
-const limit = pLimit(CONCURRENCY);
+const limitFn = pLimit(CONCURRENCY);
 let done = 0;
 
-const translatedPois = await Promise.all(pois.map(poi => limit(async () => {
+const translatedPois = await Promise.all(pois.map(poi => limitFn(async () => {
   const updated = { ...poi };
 
-  // Vertaal beschrijving
-  if (poi.description) {
-    updated.description_en = await translate(poi.description);
-    await sleep(150);
+  // Vertaal OSM-beschrijving als die niet in het Engels is
+  const osmDesc = poi.tags?.description ?? poi.tags?.['description:en'] ?? null;
+  if (osmDesc) {
+    updated.description = osmDesc;
+    const en = await translate(osmDesc);
+    updated.description_en = en ?? (likelyEnglish(osmDesc) ? osmDesc : null);
+    if (en) await sleep(100);
   }
 
-  // Vertaal elke review-tekst
-  updated.reviews = [];
-  for (const review of poi.reviews ?? []) {
-    const text_en = await translate(review.text);
-    updated.reviews.push({ ...review, text_en });
-    await sleep(100);
-  }
+  // Reviews hoeven NIET hertaald — al gedaan door Mapy.cz
+  // text_en is gelijk aan text (stap 3 zette ze al gelijk)
 
   done++;
-  if (done % 20 === 0 || done === pois.length) {
+  if (done % 30 === 0 || done === pois.length) {
     log(`Voortgang: ${done}/${pois.length} POIs (${newTranslations} nieuwe vertalingen)`);
   }
 
   return updated;
 })));
 
-// Sla vertaal-cache op (incrementeel, zodat volgende run gratis is)
 cacheWrite('translations.json', transCache);
 cacheWrite('pois-translated.json', translatedPois);
 
-ok(`Stap 5 voltooid ✓`);
-log(`  Nieuwe vertalingen : ${newTranslations}`);
-log(`  Totale tekens      : ${totalChars.toLocaleString()}`);
-log(`  (DeepL Free: 500.000 tekens/maand — je hebt nog ~${Math.max(0, 500000 - totalChars).toLocaleString()} over)`);
+ok(`Stap 5 voltooid ✓  — ${newTranslations} nieuwe DeepL-vertalingen`);

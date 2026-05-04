@@ -134,9 +134,9 @@ function renderList() {
       ? `"${esc((topReview.text_en || topReview.text || '').slice(0, 90))}…"`
       : (poi.description_en || poi.description || '');
 
-    const starsHtml = poi.rating
-      ? `<span class="stars">${starsString(poi.rating)}</span> <span style="font-size:.75rem;color:var(--text2)">${poi.rating.toFixed(1)} (${poi.review_count})</span>`
-      : (poi.reviews?.length > 0 ? `<span style="font-size:.75rem;color:var(--text2)">${poi.reviews.length} review${poi.reviews.length > 1 ? 's' : ''}</span>` : '');
+    const starsHtml = poi.rating_stars
+      ? `<span class="stars">${starsString(poi.rating_stars)}</span> <span style="font-size:.75rem;color:var(--text2)">${poi.rating_stars.toFixed(1)} (${poi.review_count})</span>`
+      : (poi.review_count > 0 ? `<span style="font-size:.75rem;color:var(--text2)">${poi.review_count} review${poi.review_count > 1 ? 's' : ''}</span>` : '');
 
     return `
       <div class="poi-card" onclick="openDetail(${poi.osm_id},'${poi.osm_type}')">
@@ -195,21 +195,27 @@ window.openDetail = function(osmId, osmType) {
   </div>`;
 
   // Reviews
+  const reviewCount = poi.review_count ?? poi.reviews?.length ?? 0;
   const reviewsHtml = (poi.reviews ?? []).length > 0
-    ? `<div id="detail-reviews-title">${poi.reviews.length} review${poi.reviews.length !== 1 ? 's' : ''} (Mapy.cz)</div>
-       ${poi.reviews.map(r => `
-         <div class="review-card">
-           <div class="review-header">
-             <span class="review-author">${esc(r.author)}</span>
-             <span class="review-date">${r.stars ? starsString(r.stars) + ' ' : ''}${r.date ? formatDate(r.date) : ''}</span>
-           </div>
-           ${r.text && r.text_en && r.text !== r.text_en
-             ? `<div class="review-original">${esc(r.text)}</div>
-                <div class="review-english">${esc(r.text_en)}</div>`
-             : `<div class="review-english">${esc(r.text_en || r.text || '')}</div>`
-           }
-         </div>
-       `).join('')}`
+    ? `<div id="detail-reviews-title">${reviewCount} review${reviewCount !== 1 ? 's' : ''} via Mapy.cz</div>
+       ${poi.reviews.map(r => {
+         const langBadge = r.was_translated && r.lang_original
+           ? `<span style="font-size:.68rem;background:var(--bg3);padding:1px 5px;border-radius:4px;color:var(--text2)">vertaald uit ${r.lang_original.toUpperCase()}</span>`
+           : '';
+         const posNeg = (r.positives || r.negatives)
+           ? `${r.positives ? `<div style="color:#66bb6a;font-size:.82rem;margin-top:4px">👍 ${esc(r.positives)}</div>` : ''}
+              ${r.negatives ? `<div style="color:#ef5350;font-size:.82rem;margin-top:2px">👎 ${esc(r.negatives)}</div>` : ''}`
+           : '';
+         return `
+           <div class="review-card">
+             <div class="review-header">
+               <span class="review-author">${esc(r.author)} ${langBadge}</span>
+               <span class="review-date">${r.stars ? starsString(r.stars) + ' ' : ''}${r.date ? formatDate(r.date) : ''}</span>
+             </div>
+             <div class="review-english">${esc(r.text_en || r.text || '')}</div>
+             ${posNeg}
+           </div>`;
+       }).join('')}`
     : `<p style="color:var(--text2);font-size:.85rem">Geen reviews gevonden op Mapy.cz voor deze locatie.</p>`;
 
   // Mapy.cz deeplink
@@ -218,8 +224,10 @@ window.openDetail = function(osmId, osmType) {
     Open op Mapy.cz (vereist internet)
   </a>`;
 
-  const starsHtml = poi.rating
-    ? `<span class="stars">${starsString(poi.rating)}</span> <span style="font-size:.82rem;color:var(--text2)">${poi.rating.toFixed(1)} / 5 (${poi.review_count} reviews)</span>`
+  const starsHtml = poi.rating_stars
+    ? `<span class="stars">${starsString(poi.rating_stars)}</span>
+       <span style="font-size:.82rem;color:var(--text2)">${poi.rating_stars.toFixed(1)} / 5 · ${poi.review_count} reviews</span>
+       ${poi.rating_caption ? `<span style="font-size:.78rem;color:var(--accent)">${esc(poi.rating_caption)}</span>` : ''}`
     : '';
 
   detail.innerHTML = `

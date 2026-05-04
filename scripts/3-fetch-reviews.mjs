@@ -1,29 +1,23 @@
 /**
  * Stap 3 — Mapy.cz reviews + foto-URLs ophalen
  *
- * Voor elke OSM-POI uit stap 2 proberen we de bijhorende Mapy.cz-pagina te vinden
- * en alle reviews + foto-URLs te extraheren.
+ * Gebruikt de bevestigde endpoint (gevonden via DevTools):
+ *   GET https://mapy.com/api/reviews/v1/review/poi/osm/{osm_id}
+ *       ?offset=0&limit=50&lang=en&bestReviewsOnly=false
+ *       &filterByLang=false&forceTranslation=true
  *
- * HOE HET WERKT
- * ─────────────
- * Mapy.cz heeft geen publieke reviews-API. We gebruiken twee technieken:
+ * forceTranslation=true → Mapy.cz vertaalt zelf al naar Engels.
+ * DeepL is daarvoor NIET meer nodig voor reviews.
+ * (Stap 5 gebruikt DeepL nog voor OSM-beschrijvingen in lokale talen.)
  *
- * 1) HTML-scraping van de place-detailpagina:
- *    https://mapy.com/en/place/osm-N{osm_id}/
- *    → Bevat JSON-LD structured data + server-side rendered reviews.
+ * Foto-URLs zitten in reviews[].gallery[].urls.default als URL-template
+ * met {width} en {height} placeholders → worden opgelost in stap 4.
  *
- * 2) XHR-API (best-guess endpoints, zie SPIKE_INSTRUCTIONS hieronder):
- *    De pagina laadt reviews dynamisch via een intern endpoint.
- *
- * ALS DE AUTOMATISCHE SCRAPING FAALT:
- *    Lees SPIKE.md voor instructies om de juiste API-endpoint te vinden
- *    via Chrome/Firefox DevTools (duurt 10-15 minuten, eenmalig).
- *
- * Output: cache/details/{osm_type}-{osm_id}.json  (per POI)
+ * Output: cache/details/{osm_type}-{osm_id}.json  (per POI, resume-vriendelijk)
  *         cache/pois-with-reviews.json             (alles samen)
  */
 
-import { existsSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
+import { mkdirSync } from 'fs';
 import { join } from 'path';
 import pLimit from 'p-limit';
 import { log, ok, warn, cacheRead, cacheWrite, cacheExists, fetchWithRetry, sleep, CACHE_DIR } from './utils.mjs';
@@ -31,166 +25,111 @@ import { log, ok, warn, cacheRead, cacheWrite, cacheExists, fetchWithRetry, slee
 const DETAILS_DIR = join(CACHE_DIR, 'details');
 mkdirSync(DETAILS_DIR, { recursive: true });
 
-const CONCURRENCY = 2;           // max 2 gelijktijdige requests naar Mapy.cz
-const DELAY_MS = 1200;           // wacht ~1.2s tussen requests
+const CONCURRENCY = 3;
+const DELAY_MS = 800;
+const REVIEWS_PER_PAGE = 50;
 const limit = pLimit(CONCURRENCY);
 
-// ── Mapy.cz endpoints om te proberen ─────────────────────────────────────────
-//
-// We proberen meerdere endpoints in volgorde. De eerste die werkt, wordt gebruikt.
-// Als GEEN van deze werkt: zie SPIKE.md.
+// ── Mapy.cz review-API (bevestigd via DevTools) ───────────────────────────────
 
-async function fetchMapyPlaceHtml(osmType, osmId) {
-  // Mapy.com URL-formaat voor OSM-plaatsen
-  const nodeType = osmType === 'node' ? 'N' : osmType === 'way' ? 'W' : 'R';
-  const url = `https://mapy.com/en/place/osm-${nodeType}${osmId}/`;
+/**
+ * Haalt alle reviews op voor één OSM-ID.
+ * Pagineert automatisch als total > REVIEWS_PER_PAGE.
+ * @returns { rating_stars, rating_100, total, reviews[], photo_urls[] }
+ */
+async function fetchMapyReviews(osmId) {
+  const base = `https://mapy.com/api/reviews/v1/review/poi/osm/${osmId}`;
+  const params = new URLSearchParams({
+    lang: 'en',
+    bestReviewsOnly: 'false',
+    filterByLang: 'false',
+    forceTranslation: 'true',
+  });
 
-  try {
-    const res = await fetchWithRetry(url, {
-      headers: {
-        'Accept': 'text/html,application/xhtml+xml,*/*',
-        'Accept-Language': 'en-GB,en;q=0.9',
-      }
-    });
-    if (!res.ok) return null;
-    return { url, html: await res.text() };
-  } catch {
-    return null;
-  }
-}
+  let allReviews = [];
+  let meta = {};
+  let offset = 0;
 
-async function fetchMapyReviewsApi(osmType, osmId) {
-  // Probeer de interne Mapy.com review-API (best-guess endpoints)
-  // Één van deze zou moeten werken — als geen werkt, zie SPIKE.md.
+  while (true) {
+    params.set('offset', String(offset));
+    params.set('limit', String(REVIEWS_PER_PAGE));
+    const url = `${base}?${params}`;
 
-  const nodeType = osmType === 'node' ? 'node' : osmType === 'way' ? 'way' : 'relation';
-  const candidates = [
-    // Nieuwste Mapy.com API (meest waarschijnlijk)
-    `https://api.mapy.com/v1/poi/reviews?source=osm&osmType=${nodeType}&id=${osmId}&lang=en&offset=0&limit=50`,
-    `https://api.mapy.com/v1/poi/${osmId}/reviews?source=osm&lang=en`,
-    // Oudere Mapy.cz API
-    `https://pro.mapy.cz/api/reviews?source=osm&id=${osmId}&lang=en`,
-    `https://api.mapy.cz/reviews?source=osm&id=${osmId}`,
-  ];
-
-  for (const url of candidates) {
     try {
       const res = await fetchWithRetry(url, {
-        headers: { 'Referer': `https://mapy.com/en/place/osm-N${osmId}/` }
+        headers: {
+          'Referer': 'https://mapy.com/',
+          'Accept': 'application/json',
+        },
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && (data.reviews || data.items || Array.isArray(data))) {
-          log(`    ✓ Reviews API gevonden: ${url}`);
-          return { url, data };
-        }
+
+      if (res.status === 404) return null;     // POI niet bekend op Mapy.cz
+      if (!res.ok) {
+        warn(`HTTP ${res.status} voor OSM-ID ${osmId}`);
+        return null;
       }
-    } catch {
-      // volgende endpoint proberen
+
+      const data = await res.json();
+
+      // Eerste pagina: sla metadata op
+      if (offset === 0) {
+        meta = {
+          rating_stars: data.review_rating_stars ?? null,
+          rating_100: data.review_rating ?? null,
+          rating_caption: data.review_rating_caption ?? null,
+          total: data.total ?? 0,
+        };
+      }
+
+      const page = data.reviews ?? [];
+      allReviews = allReviews.concat(page);
+
+      // Stop als we alles hebben
+      if (allReviews.length >= meta.total || page.length < REVIEWS_PER_PAGE) break;
+      offset += REVIEWS_PER_PAGE;
+      await sleep(DELAY_MS);
+    } catch (err) {
+      warn(`Netwerk-fout voor OSM ${osmId}: ${err.message}`);
+      return null;
     }
-    await sleep(300);
-  }
-  return null;
-}
-
-// ── HTML-parsing: JSON-LD + fallback text ─────────────────────────────────────
-
-function extractFromHtml(html, sourceUrl) {
-  const result = {
-    found_on_mapy: false,
-    mapy_url: sourceUrl,
-    name: null,
-    description: null,
-    rating: null,
-    review_count: null,
-    reviews: [],
-    photo_urls: [],
-    raw_jsonld: null,
-  };
-
-  if (!html) return result;
-
-  // 1) Zoek JSON-LD structured data (<script type="application/ld+json">)
-  const jsonLdMatches = [...html.matchAll(/<script[^>]+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)];
-  for (const match of jsonLdMatches) {
-    try {
-      const obj = JSON.parse(match[1]);
-      // Array of objects or single object
-      const items = Array.isArray(obj) ? obj : [obj];
-      for (const item of items) {
-        if (item['@type'] === 'LocalBusiness' || item['@type'] === 'TouristAttraction' ||
-            item['@type'] === 'Accommodation' || item['@type'] === 'LodgingBusiness' ||
-            item['@type'] === 'Place') {
-          result.found_on_mapy = true;
-          result.raw_jsonld = item;
-          result.name = item.name ?? result.name;
-          result.description = item.description ?? result.description;
-          if (item.aggregateRating) {
-            result.rating = parseFloat(item.aggregateRating.ratingValue) || null;
-            result.review_count = parseInt(item.aggregateRating.reviewCount) || null;
-          }
-          // Reviews in JSON-LD
-          if (Array.isArray(item.review)) {
-            for (const r of item.review) {
-              result.reviews.push({
-                author: r.author?.name ?? r.author ?? 'Anoniem',
-                date: r.datePublished ?? null,
-                stars: parseFloat(r.reviewRating?.ratingValue) || null,
-                text: r.reviewBody ?? r.description ?? '',
-                text_en: null,
-                source: 'jsonld',
-              });
-            }
-          }
-          // Foto's
-          if (item.image) {
-            const imgs = Array.isArray(item.image) ? item.image : [item.image];
-            for (const img of imgs) {
-              const url = typeof img === 'string' ? img : img?.url;
-              if (url) result.photo_urls.push(url);
-            }
-          }
-        }
-      }
-    } catch { /* ongeldige JSON — overslaan */ }
   }
 
-  // 2) Zoek Open Graph afbeelding als fallback foto
-  const ogImage = html.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i)?.[1];
-  if (ogImage && !result.photo_urls.includes(ogImage)) {
-    result.photo_urls.push(ogImage);
-  }
-
-  // 3) Zoek Mapy.cz eigen foto-CDN links
-  const mapyPhotos = [...html.matchAll(/https?:\/\/[a-z0-9-]+\.mapy\.cz\/[^"' \n]+\.(jpg|jpeg|png|webp)/gi)];
-  for (const m of mapyPhotos) {
-    if (!result.photo_urls.includes(m[0])) result.photo_urls.push(m[0]);
-  }
-
-  // 4) Controleer of de pagina überhaupt gevonden werd (404-pagina herkennen)
-  if (html.includes('"statusCode":404') || html.includes('page-not-found') || html.length < 500) {
-    result.found_on_mapy = false;
-  } else if (result.name || result.reviews.length > 0) {
-    result.found_on_mapy = true;
-  } else if (!html.includes('404') && html.length > 5000) {
-    // Pagina bestaat maar bevat geen gestructureerde data — markeer als gevonden
-    result.found_on_mapy = true;
-  }
-
-  return result;
-}
-
-function parseReviewsFromApi(apiData) {
-  if (!apiData) return [];
-  const raw = apiData.reviews || apiData.items || (Array.isArray(apiData) ? apiData : []);
-  return raw.map(r => ({
-    author: r.author?.name ?? r.username ?? r.nick ?? 'Anoniem',
-    date: r.date ?? r.created_at ?? r.timestamp ?? null,
-    stars: r.rating ?? r.stars ?? r.score ?? null,
-    text: r.text ?? r.body ?? r.content ?? '',
-    text_en: null,
-    source: 'api',
+  // Verwerk reviews naar ons interne formaat
+  const reviews = allReviews.map(r => ({
+    id: r.id,
+    author: r.user?.name ?? 'Anoniem',
+    date: r.updated ? r.updated.slice(0, 10) : null,   // "2024-07-24"
+    stars: r.rating != null ? Math.round(r.rating / 20) : null,  // 0-100 → 1-5
+    rating_100: r.rating ?? null,
+    lang_original: r.lang ?? null,
+    was_translated: !(r.native ?? true),
+    // forceTranslation=true: text is al in het Engels
+    text: r.text ?? '',
+    text_en: r.text ?? '',   // zelfde: al vertaald door Mapy.cz
+    positives: r.positives ?? null,
+    negatives: r.negatives ?? null,
+    source: 'mapy-review-api',
   }));
+
+  // Foto-URL-templates uit de gallery van alle reviews
+  const photoTemplates = [];
+  for (const r of allReviews) {
+    for (const img of (r.gallery ?? [])) {
+      if (img.urls?.default && img.status === 'approved') {
+        photoTemplates.push({
+          template: img.urls.default,   // bevat {width} en {height}
+          size: img.size ?? [1920, 1080],
+          take_date: img.takeDate ?? null,
+          visits: img.visits ?? 0,
+        });
+      }
+    }
+  }
+
+  // Sorteer foto's op populariteit (meeste bezoeken eerst)
+  photoTemplates.sort((a, b) => b.visits - a.visits);
+
+  return { ...meta, reviews, photo_templates: photoTemplates };
 }
 
 // ── Per-POI verwerking ────────────────────────────────────────────────────────
@@ -205,45 +144,25 @@ async function processPoi(poi) {
   const detail = {
     ...poi,
     found_on_mapy: false,
-    mapy_url: null,
-    name_mapy: null,
-    description: null,
-    rating: null,
-    review_count: null,
+    mapy_url: `https://mapy.com/en/place/osm-${poi.osm_type === 'node' ? 'N' : poi.osm_type === 'way' ? 'W' : 'R'}${poi.osm_id}/`,
+    rating_stars: null,
+    rating_caption: null,
+    review_count: 0,
     reviews: [],
-    photo_urls: [],
+    photo_templates: [],
+    photos: [],             // wordt gevuld in stap 4
   };
 
-  // A) Probeer HTML te scrapen
-  const htmlResult = await fetchMapyPlaceHtml(poi.osm_type, poi.osm_id);
-  if (htmlResult) {
-    await sleep(DELAY_MS);
-    const parsed = extractFromHtml(htmlResult.html, htmlResult.url);
-    Object.assign(detail, parsed);
-    detail.mapy_url = htmlResult.url;
-  }
+  const result = await fetchMapyReviews(poi.osm_id);
 
-  // B) Als HTML weinig reviews gaf, probeer de API-endpoint
-  if (detail.reviews.length < 3) {
-    await sleep(DELAY_MS);
-    const apiResult = await fetchMapyReviewsApi(poi.osm_type, poi.osm_id);
-    if (apiResult) {
-      const apiReviews = parseReviewsFromApi(apiResult.data);
-      // Merge: voeg API-reviews toe die nog niet in de HTML-reviews zitten
-      const existingTexts = new Set(detail.reviews.map(r => r.text.slice(0, 50)));
-      for (const r of apiReviews) {
-        if (!existingTexts.has(r.text.slice(0, 50))) {
-          detail.reviews.push(r);
-          detail.found_on_mapy = true;
-        }
-      }
-    }
+  if (result) {
+    detail.found_on_mapy = true;
+    detail.rating_stars = result.rating_stars;
+    detail.rating_caption = result.rating_caption;
+    detail.review_count = result.total;
+    detail.reviews = result.reviews;
+    detail.photo_templates = result.photo_templates;
   }
-
-  // Begrens tot max 20 meest recente reviews
-  detail.reviews = detail.reviews
-    .sort((a, b) => (b.date ?? '') > (a.date ?? '') ? 1 : -1)
-    .slice(0, 20);
 
   cacheWrite(cacheFile, detail);
   return detail;
@@ -258,7 +177,7 @@ if (!pois) {
 }
 
 log(`${pois.length} POIs verwerken (max ${CONCURRENCY} gelijktijdig, ~${DELAY_MS}ms tussenpauze)…`);
-log('Dit kan 10-30 minuten duren afhankelijk van het aantal POIs.');
+log('forceTranslation=true: Mapy.cz vertaalt reviews zelf naar Engels 🌍');
 log('De voortgang wordt per POI gecached → herstart is altijd veilig.\n');
 
 let done = 0;
@@ -272,6 +191,7 @@ const results = await Promise.all(
     if (done % 10 === 0 || done === pois.length) {
       log(`Voortgang: ${done}/${pois.length} (${foundOnMapy} op Mapy.cz gevonden)`);
     }
+    await sleep(DELAY_MS);
     return detail;
   }))
 );
@@ -279,12 +199,9 @@ const results = await Promise.all(
 cacheWrite('pois-with-reviews.json', results);
 
 const withReviews = results.filter(p => p.reviews.length > 0).length;
+const totalPhotos = results.reduce((s, p) => s + p.photo_templates.length, 0);
+
 ok(`Stap 3 voltooid ✓`);
 log(`  Gevonden op Mapy.cz : ${foundOnMapy}/${pois.length}`);
 log(`  Met reviews         : ${withReviews}/${pois.length}`);
-
-if (foundOnMapy < pois.length * 0.3) {
-  warn('Minder dan 30% van de POIs gevonden op Mapy.cz.');
-  warn('De automatische review-API werkt mogelijk niet (Mapy.cz heeft hem gewijzigd).');
-  warn('👉  Lees SPIKE.md voor instructies om de endpoint zelf te vinden via DevTools.');
-}
+log(`  Foto-templates      : ${totalPhotos} totaal`);
