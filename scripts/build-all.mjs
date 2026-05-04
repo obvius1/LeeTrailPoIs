@@ -4,7 +4,10 @@
  */
 
 import { spawnSync } from 'child_process';
+import { fileURLToPath } from 'url';
 import { log, ok } from './utils.mjs';
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 const steps = [
   { script: '1-buffer.mjs',         label: 'Stap 1: GPX → zoekzone' },
@@ -28,7 +31,7 @@ for (const step of steps) {
 
   const result = spawnSync('node', [`scripts/${step.script}`], {
     stdio: 'inherit',
-    cwd: new URL('..', import.meta.url).pathname,
+    cwd: ROOT,
   });
 
   if (result.status !== 0) {
