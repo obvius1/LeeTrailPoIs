@@ -185,7 +185,7 @@ async function checkCacheStatus() {
     if (!peaksCache) return;
 
     const [tileUrls, cache] = await Promise.all([
-      fetch('/map-tiles.json').then(r => r.json()),
+      fetch('map-tiles.json').then(r => r.json()),
       caches.open(peaksCache),
     ]);
     const cachedKeys = await cache.keys();

@@ -7,20 +7,20 @@
  *              De app controleert eerst of we op WiFi zitten.
  */
 
-const CACHE_VERSION = 'v10';
+const CACHE_VERSION = 'v11';
 const CACHE_NAME = `peaks-pois-${CACHE_VERSION}`;
 
 // App shell: klein, altijd gecached, ook op mobiele data
 const PRECACHE_STATIC = [
-  '/',
-  '/index.html',
-  '/app.js',
-  '/style.css',
-  '/leaflet.min.js',
-  '/leaflet.css',
-  '/manifest.webmanifest',
-  '/data.json',
-  '/map-tiles.json',
+  './',
+  './index.html',
+  './app.js',
+  './style.css',
+  './leaflet.min.js',
+  './leaflet.css',
+  './manifest.webmanifest',
+  './data.json',
+  './map-tiles.json',
 ];
 
 let _cacheJobRunning = false;
@@ -72,7 +72,7 @@ async function runPrecache() {
 
   // 1. Foto's (uit data.json)
   try {
-    const data = await fetch('/data.json').then(r => r.json());
+    const data = await fetch('./data.json').then(r => r.json());
     const assets = [];
     for (const poi of data.pois ?? []) {
       for (const photo of poi.photos        ?? []) assets.push(photo);
@@ -89,7 +89,7 @@ async function runPrecache() {
 
   // 2. Kaarttiles (gegenereerd door build, zoom 1-17)
   try {
-    const tileUrls = await fetch('/map-tiles.json').then(r => r.json());
+    const tileUrls = await fetch('./map-tiles.json').then(r => r.json());
     let tilesOk = 0, tilesDone = 0;
 
     for (let i = 0; i < tileUrls.length; i += 30) {
