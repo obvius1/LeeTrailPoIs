@@ -15,9 +15,6 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -27,16 +24,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configureer GitHub Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v6
 
       - name: Upload web/ als Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v6
         with:
           path: web/
 
       - name: Deploy naar GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
