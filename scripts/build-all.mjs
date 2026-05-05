@@ -12,10 +12,12 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const steps = [
   { script: '1-buffer.mjs',         label: 'Stap 1: GPX → zoekzone' },
   { script: '2-discover-pois.mjs',  label: 'Stap 2: POIs zoeken via Overpass' },
+  { script: '2b-mapy-ids.mjs',      label: 'Stap 2b: Mapy.cz interne IDs ophalen' },
   { script: '3-fetch-reviews.mjs',  label: 'Stap 3: Mapy.cz reviews ophalen' },
+  { script: '3b-google-reviews.mjs',label: 'Stap 3b: Google Places reviews + foto\'s' },
   { script: '4-download-photos.mjs',label: 'Stap 4: Foto\'s downloaden' },
   { script: '5-translate.mjs',      label: 'Stap 5: Reviews vertalen' },
-  { script: '6-build-tiles.mjs',    label: 'Stap 6: Mini-kaartjes genereren' },
+  // Stap 6 (statische mini-tiles) vervangen door interactieve Leaflet mini-kaart in de app
   { script: '7-bundle.mjs',         label: 'Stap 7: data.json samenvoegen' },
 ];
 

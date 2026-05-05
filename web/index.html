@@ -46,8 +46,24 @@
       <button class="chip" data-cat="water">💧 Water</button>
       <button class="chip" data-cat="food">🍽 Eten</button>
       <button class="chip" data-cat="sights">🏔 Zien</button>
+      <button class="chip chip-star" data-cat="starred">★ Favorieten</button>
     </div>
   </header>
+
+  <!-- Verbindingsprompt (op mobiele data) -->
+  <div id="cache-prompt" style="display:none">
+    <span id="cache-prompt-text">📱 Je bent op mobiele data. Kaartdata (~307 MB) nog niet gecached.</span>
+    <div id="cache-prompt-btns">
+      <button id="cache-prompt-yes">Toch downloaden</button>
+      <button id="cache-prompt-no">Later</button>
+    </div>
+  </div>
+
+  <!-- Cache-voortgang (zichtbaar tijdens download of bij heropenen) -->
+  <div id="cache-status" style="display:none">
+    <div id="cache-status-bar"><div id="cache-status-fill"></div></div>
+    <span id="cache-status-text"></span>
+  </div>
 
   <!-- Statistieken -->
   <div id="stats">Laden…</div>
@@ -80,6 +96,16 @@
 
   <!-- GPS-knop -->
   <button id="locate-btn" aria-label="Toon locaties dicht bij mij">📍</button>
+
+  <!-- Lightbox foto-viewer -->
+  <div id="lightbox" role="dialog" aria-modal="true" aria-label="Foto volledig scherm">
+    <button id="lightbox-close" onclick="closeLightbox()" aria-label="Sluiten">✕</button>
+    <button id="lightbox-prev" aria-label="Vorige foto">‹</button>
+    <img id="lightbox-img" alt="">
+    <button id="lightbox-next" aria-label="Volgende foto">›</button>
+    <div id="lightbox-counter"></div>
+    <div id="lightbox-date" class="hidden"></div>
+  </div>
 
   <script src="leaflet.min.js"></script>
   <script src="app.js"></script>

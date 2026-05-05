@@ -108,8 +108,88 @@ body {
 .chip[data-cat="water"].active  { background: var(--water); }
 .chip[data-cat="food"].active   { background: var(--food); }
 .chip[data-cat="sights"].active { background: var(--sights); }
+/* Favorieten-chip: goudgeel */
+.chip-star { border-color: #c8962a44; color: #c8962a; }
+.chip-star.active { background: #c8962a; color: #fff; border-color: transparent; }
 
 /* ── Statistieken-balk ───────────────────────────────────────────────────── */
+/* ── Verbindingsprompt (mobiele data) ────────────────────────────────────── */
+
+#cache-prompt {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #2a1f0e;
+  border-bottom: 1px solid #a0660044;
+  font-size: .78rem;
+  color: #e8c97a;
+}
+#cache-prompt-text {
+  line-height: 1.4;
+}
+#cache-prompt-btns {
+  display: flex;
+  gap: 8px;
+}
+#cache-prompt-yes {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: .78rem;
+  cursor: pointer;
+}
+#cache-prompt-no {
+  background: transparent;
+  color: var(--text2);
+  border: 1px solid var(--bg3);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: .78rem;
+  cursor: pointer;
+}
+
+/* ── Cache-voortgangsbalk ────────────────────────────────────────────────── */
+
+#cache-status {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 16px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--bg3);
+  font-size: .72rem;
+  color: var(--text2);
+  transition: opacity .6s;
+}
+#cache-status.cache-complete {
+  color: #4caf7d;
+}
+#cache-status-bar {
+  flex: 1;
+  height: 3px;
+  background: var(--bg3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+#cache-status-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width .4s ease;
+}
+#cache-status.cache-complete #cache-status-fill {
+  background: #4caf7d;
+}
+#cache-status-text {
+  white-space: nowrap;
+  min-width: 170px;
+  text-align: right;
+}
+
 #stats {
   padding: 6px 16px;
   font-size: .78rem;
@@ -243,6 +323,24 @@ body {
   line-height: 1;
 }
 
+/* Ster-knop rechtsboven in detail-header */
+#detail-star-btn {
+  margin-left: auto;   /* duwt naar rechts */
+  font-size: 1.6rem;
+  color: var(--text2);
+  transition: color .15s, transform .1s;
+}
+#detail-star-btn:active { transform: scale(1.3); }
+#detail-star-btn.starred { color: #f4b942; }
+
+/* Ster-badge naast naam in lijstkaart */
+.poi-star-badge {
+  color: #f4b942;
+  font-size: .95rem;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
 #detail-back h2 {
   font-size: 1rem;
   font-weight: 700;
@@ -252,23 +350,28 @@ body {
   white-space: nowrap;
 }
 
-/* Mini-kaart */
-#detail-tile {
+/* Interactieve mini-kaart in detail-venster */
+#detail-mini-map {
   width: 100%;
-  max-height: 220px;
-  object-fit: cover;
-  display: block;
+  height: 220px;
   background: var(--bg3);
+  position: relative;
+  z-index: 1;           /* onder de sticky header (z-index:10) */
 }
-#detail-tile-placeholder {
-  width: 100%;
-  height: 160px;
-  background: var(--bg3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text2);
-  font-size: .9rem;
+/* Compactere Leaflet-attributie in de mini-kaart */
+#detail-mini-map .leaflet-control-attribution {
+  font-size: 9px;
+  opacity: 0.7;
+  background: rgba(0,0,0,.45);
+  color: #ddd;
+}
+#detail-mini-map .leaflet-control-attribution a { color: #adf; }
+/* Zoom-knoppen iets kleiner */
+#detail-mini-map .leaflet-control-zoom a {
+  width: 28px;
+  height: 28px;
+  line-height: 28px;
+  font-size: 16px;
 }
 
 /* Foto-carousel */
@@ -281,14 +384,7 @@ body {
 }
 #detail-photos::-webkit-scrollbar { display: none; }
 
-#detail-photos img {
-  height: 130px;
-  width: auto;
-  border-radius: 8px;
-  object-fit: cover;
-  flex-shrink: 0;
-  background: var(--bg3);
-}
+/* hoogte via .photo-wrap img — zie Lightbox-sectie */
 
 /* Info-blok */
 #detail-info {
@@ -367,22 +463,63 @@ body {
   border-radius: 6px;
   color: var(--text2);
 }
+/* Tag die van Google Maps afkomstig is */
+.tag.tag-google {
+  border: 1px solid rgba(66,133,244,.35);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tag.tag-google a { color: #7ab4ff; text-decoration: none; }
+.tag.tag-google a:hover { text-decoration: underline; }
+/* Klein G-badge rechtsboven in de tag */
+.tag-google-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #4285f4;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  font-style: normal;
+  line-height: 1;
+  flex-shrink: 0;
+}
 
 /* Open-in-Mapy-knop */
-#open-mapy-btn {
-  display: block;
-  width: 100%;
-  padding: 13px;
+/* Twee externe knoppen naast elkaar */
+#open-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
   margin-top: 16px;
-  background: var(--accent);
-  color: #fff;
-  border: none;
+}
+.open-btn {
+  display: block;
+  padding: 12px 8px;
   border-radius: var(--radius);
-  font-size: .95rem;
+  font-size: .85rem;
   font-weight: 700;
-  cursor: pointer;
   text-align: center;
   text-decoration: none;
+  white-space: nowrap;
+}
+.open-btn-mapy {
+  background: var(--accent);
+  color: #fff;
+}
+.open-btn-google {
+  background: #4285f4;
+  color: #fff;
+}
+.open-btns-note {
+  text-align: center;
+  font-size: .72rem;
+  color: var(--text2);
+  margin: 5px 0 0;
 }
 
 /* Geen-resultaten */
@@ -443,8 +580,8 @@ body {
 /* ── Kaartweergave ───────────────────────────────────────────────────────── */
 #map-view {
   position: fixed;
-  /* Begint onder de sticky header (~130px) */
-  top: 130px;
+  /* top wordt dynamisch ingesteld via JS (header.offsetHeight) */
+  top: 0;
   left: 0; right: 0;
   bottom: 0;
   z-index: 10;
@@ -506,6 +643,213 @@ body {
   border-radius: 50%;
   background: rgba(41,121,255,.3);
   animation: pulse 1.8s ease-out infinite;
+}
+
+/* ── Lightbox ────────────────────────────────────────────────────────────── */
+#lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .93);
+  z-index: 500;
+  align-items: center;
+  justify-content: center;
+  touch-action: none; /* pinch-zoom zelf afhandelen */
+  overflow: hidden;
+}
+#lightbox.open { display: flex; }
+
+#lightbox-img {
+  max-width: 100%;
+  max-height: 100dvh;
+  object-fit: contain;
+  border-radius: 4px;
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none; /* klik gaat door naar overlay → sluit */
+}
+
+#lightbox-close {
+  position: fixed;
+  top: calc(var(--safe-top) + 12px);
+  right: 16px;
+  background: rgba(0, 0, 0, .55);
+  border: none;
+  color: #fff;
+  font-size: 1.3rem;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+#lightbox-prev,
+#lightbox-next {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0, 0, 0, .45);
+  border: none;
+  color: #fff;
+  font-size: 2.2rem;
+  width: 44px;
+  height: 64px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  line-height: 1;
+}
+#lightbox-prev { left: 6px; }
+#lightbox-next { right: 6px; }
+#lightbox-prev.hidden,
+#lightbox-next.hidden { visibility: hidden; }
+
+#lightbox-counter {
+  position: fixed;
+  bottom: calc(var(--safe-bottom) + 20px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  font-size: .82rem;
+  padding: 4px 14px;
+  border-radius: 20px;
+  pointer-events: none;
+}
+#lightbox-counter.hidden { display: none; }
+
+/* foto-thumbnails zijn klikbaar */
+#detail-photos img { cursor: zoom-in; }
+
+/* foto-wrapper voor Google-badge */
+.photo-wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.photo-wrap img {
+  height: 130px;
+  width: auto;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--bg3);
+  display: block;
+}
+/* Verwijder oude standalone img-stijl (nu via .photo-wrap img) */
+
+/* Google "G" badge op foto's */
+.photo-wrap.google-photo::after {
+  content: 'G';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  color: #4285F4;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: Arial, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.4);
+  pointer-events: none;
+}
+
+/* Datum-badge op foto-thumbnail */
+.photo-date {
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  background: rgba(0, 0, 0, .58);
+  color: #fff;
+  font-size: .6rem;
+  padding: 2px 5px;
+  border-radius: 3px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Datum-label in lightbox (boven de teller) */
+#lightbox-date {
+  position: fixed;
+  bottom: calc(var(--safe-bottom) + 58px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, .58);
+  color: #fff;
+  font-size: .8rem;
+  padding: 3px 12px;
+  border-radius: 20px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+#lightbox-date.hidden { display: none; }
+
+/* ── Review-tabs ─────────────────────────────────────────────────────────── */
+.review-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.review-tab {
+  flex: 1;
+  padding: 7px 4px;
+  border-radius: 8px;
+  border: 1.5px solid var(--bg3);
+  background: transparent;
+  color: var(--text2);
+  font-size: .82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.review-tab.active {
+  background: var(--bg3);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.tab-count {
+  font-size: .72rem;
+  font-weight: 400;
+  opacity: .75;
+}
+
+/* Google-attributie */
+.google-attr {
+  font-size: .7rem;
+  color: var(--text2);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.google-attr-g {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #4285F4;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: Arial, sans-serif;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 /* ── Loading ──────────────────────────────────────────────────────────────── */

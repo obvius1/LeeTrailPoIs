@@ -1,14 +1,16 @@
 /**
  * Service Worker — zorgt voor 100% offline werking
  *
- * Strategie: bij installatie alles pre-cachen (foto's + tiles + data).
- * Daarna: cache-first voor alle requests.
+ * Strategie:
+ *   Install  → enkel app shell (klein, altijd, geen toestemming nodig)
+ *   Message  → grote cache (foto's + tiles) op verzoek van de app
+ *              De app controleert eerst of we op WiFi zitten.
  */
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v10';
 const CACHE_NAME = `peaks-pois-${CACHE_VERSION}`;
 
-// Bestanden die altijd pre-gecached worden (app shell)
+// App shell: klein, altijd gecached, ook op mobiele data
 const PRECACHE_STATIC = [
   '/',
   '/index.html',
@@ -21,64 +23,22 @@ const PRECACHE_STATIC = [
   '/map-tiles.json',
 ];
 
-// ── Install: pre-cache app shell ──────────────────────────────────────────────
+let _cacheJobRunning = false;
+
+// ── Helper: stuur voortgang naar alle open tabs ───────────────────────────────
+
+async function broadcastProgress(done, total) {
+  const pct = Math.round(done / total * 100);
+  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  clients.forEach(c => c.postMessage({ type: 'CACHE_PROGRESS', done, total, pct }));
+}
+
+// ── Install: enkel app shell (snel + klein) ───────────────────────────────────
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async cache => {
-      // App shell
-      await cache.addAll(PRECACHE_STATIC);
-
-      // Laad data.json om alle assets te kennen
-      try {
-        const res = await fetch('/data.json');
-        const data = await res.json();
-        const assets = [];
-
-        for (const poi of data.pois ?? []) {
-          if (poi.tile) assets.push('/' + poi.tile);
-          for (const photo of poi.photos ?? []) {
-            assets.push('/' + photo);
-          }
-        }
-
-        // Cache in batches van 50 om geen timeout te triggeren
-        for (let i = 0; i < assets.length; i += 50) {
-          const batch = assets.slice(i, i + 50);
-          await Promise.allSettled(batch.map(url => cache.add(url).catch(() => {})));
-        }
-
-        console.log(`[SW] ${assets.length} POI-assets gecached`);
-
-        // Pre-cache kaart-tiles (zoom 12-16, gegenereerd door build)
-        // Laad eerst de lage zooms (snel), dan de hogere in de achtergrond
-        try {
-          const tilesRes = await fetch('/map-tiles.json');
-          const tileUrls = await tilesRes.json();
-          let tilesDone = 0;
-          // Batches van 30 met kleine pauze — beleefd voor OSM-servers
-          for (let i = 0; i < tileUrls.length; i += 30) {
-            const batch = tileUrls.slice(i, i + 30);
-            await Promise.allSettled(batch.map(url =>
-              fetch(url, { cache: 'force-cache' })
-                .then(r => r.ok ? cache.put(url, r) : null)
-                .catch(() => null)
-            ));
-            tilesDone += batch.length;
-            // Pauze elke 300 tiles (~10 batches) om throttling te vermijden
-            if (tilesDone % 300 === 0) await new Promise(r => setTimeout(r, 500));
-          }
-          console.log(`[SW] ${tilesDone} kaart-tiles gecached`);
-        } catch (err) {
-          console.warn('[SW] Kaart-tiles pre-cachen mislukt (geen internet?):', err.message);
-        }
-      } catch (err) {
-        console.warn('[SW] Kon assets niet pre-cachen:', err.message);
-      }
-    })
+    caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE_STATIC))
   );
-
-  // Activeer direct (geen wachten op oude tab)
   self.skipWaiting();
 });
 
@@ -97,30 +57,77 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
+// ── Message: start grote cache op verzoek van de app ─────────────────────────
+
+self.addEventListener('message', event => {
+  if (event.data?.type === 'START_PRECACHE') {
+    if (_cacheJobRunning) return; // al bezig
+    _cacheJobRunning = true;
+    runPrecache().finally(() => { _cacheJobRunning = false; });
+  }
+});
+
+async function runPrecache() {
+  const cache = await caches.open(CACHE_NAME);
+
+  // 1. Foto's (uit data.json)
+  try {
+    const data = await fetch('/data.json').then(r => r.json());
+    const assets = [];
+    for (const poi of data.pois ?? []) {
+      for (const photo of poi.photos        ?? []) assets.push(photo);
+      for (const photo of poi.google_photos ?? []) assets.push(photo);
+    }
+    for (let i = 0; i < assets.length; i += 50) {
+      const batch = assets.slice(i, i + 50);
+      await Promise.allSettled(batch.map(url => cache.add(url).catch(() => {})));
+    }
+    console.log(`[SW] ${assets.length} foto's gecached`);
+  } catch (err) {
+    console.warn('[SW] Foto-caching mislukt:', err.message);
+  }
+
+  // 2. Kaarttiles (gegenereerd door build, zoom 1-17)
+  try {
+    const tileUrls = await fetch('/map-tiles.json').then(r => r.json());
+    let tilesOk = 0, tilesDone = 0;
+
+    for (let i = 0; i < tileUrls.length; i += 30) {
+      const batch = tileUrls.slice(i, i + 30);
+      const results = await Promise.allSettled(batch.map(url =>
+        fetch(url, { cache: 'force-cache' })
+          .then(r => r.ok ? cache.put(url, r) : null)
+          .catch(() => null)
+      ));
+      tilesOk   += results.filter(r => r.status === 'fulfilled' && r.value !== null).length;
+      tilesDone += batch.length;
+      await broadcastProgress(tilesOk, tileUrls.length);
+      if (tilesDone % 300 === 0) await new Promise(r => setTimeout(r, 500));
+    }
+    console.log(`[SW] ${tilesOk}/${tilesDone} tiles gecached`);
+  } catch (err) {
+    console.warn('[SW] Tile-caching mislukt:', err.message);
+  }
+}
+
 // ── Fetch: cache-first ────────────────────────────────────────────────────────
 
 self.addEventListener('fetch', event => {
-  // Enkel GET requests cachen
   if (event.request.method !== 'GET') return;
 
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;
-
-      // Niet in cache — probeer netwerk en cache het resultaat
       return fetch(event.request).then(response => {
         if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then(c => c.put(event.request, clone));
         }
         return response;
-      }).catch(() => {
-        // Volledig offline en niet in cache — geef een fallback
-        return new Response(
-          '<h2>Offline</h2><p>Dit bestand is niet gecached. Verbind internet voor de eerste keer.</p>',
-          { headers: { 'Content-Type': 'text/html' } }
-        );
-      });
+      }).catch(() => new Response(
+        '<h2>Offline</h2><p>Dit bestand is niet gecached. Verbind eerst met internet.</p>',
+        { headers: { 'Content-Type': 'text/html' } }
+      ));
     })
   );
 });

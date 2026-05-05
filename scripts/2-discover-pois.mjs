@@ -33,9 +33,19 @@ const QUERIES = [
       node["tourism"="guest_house"];
       node["tourism"="hostel"];
       node["tourism"="chalet"];
+      node["tourism"="hotel"];
       way["tourism"="camp_site"];
       way["tourism"="alpine_hut"];
       way["tourism"="guest_house"];
+      way["tourism"="hostel"];
+      way["tourism"="chalet"];
+      way["tourism"="hotel"];
+      relation["tourism"="camp_site"];
+      relation["tourism"="alpine_hut"];
+      relation["tourism"="guest_house"];
+      relation["tourism"="hostel"];
+      relation["tourism"="chalet"];
+      relation["tourism"="hotel"];
     )`
   },
   {
@@ -57,6 +67,11 @@ const QUERIES = [
       node["amenity"="pub"];
       node["shop"="convenience"];
       node["shop"="supermarket"];
+      way["amenity"="restaurant"];
+      way["amenity"="cafe"];
+      way["shop"="supermarket"];
+      relation["amenity"="restaurant"];
+      relation["shop"="supermarket"];
     )`
   },
   {
@@ -69,6 +84,10 @@ const QUERIES = [
       node["historic"="castle"];
       node["tourism"="attraction"];
       way["waterway"="waterfall"];
+      way["historic"="castle"];
+      way["tourism"="attraction"];
+      relation["historic"="castle"];
+      relation["tourism"="attraction"];
     )`
   }
 ];

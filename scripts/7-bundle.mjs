@@ -17,11 +17,17 @@ import { log, ok, warn, cacheRead, WEB_DIR, ROOT } from './utils.mjs';
 
 mkdirSync(WEB_DIR, { recursive: true });
 
-const pois = cacheRead('pois-with-tiles.json');
+// Stap 6 (statische mini-tiles) is vervangen door een interactieve Leaflet mini-kaart.
+// Bundel leest nu van stap 5 (pois-translated.json).
+const pois  = cacheRead('pois-translated.json');
 const route = cacheRead('route.geojson');
 
+// Google Places data (optioneel — gebouwd door stap 3b)
+const googleRaw = cacheRead('pois-with-google.json') ?? [];
+const googleMap = new Map(googleRaw.map(g => [`${g.osm_type}-${g.osm_id}`, g]));
+
 if (!pois) {
-  console.error('❌  cache/pois-with-tiles.json niet gevonden. Voer eerst stap 6 uit.');
+  console.error('❌  cache/pois-translated.json niet gevonden. Voer eerst stap 5 uit.');
   process.exit(1);
 }
 if (!route) {
@@ -38,6 +44,10 @@ const bundled = pois.map(poi => {
   const point = { type: 'Feature', geometry: { type: 'Point', coordinates: [poi.lon, poi.lat] } };
   const nearest = nearestPointOnLine(route, point, { units: 'kilometers' });
   const distanceKm = nearest.properties.location ?? 0;
+
+  // Google Places data opzoeken
+  const gKey  = `${poi.osm_type}-${poi.osm_id}`;
+  const gData = googleMap.get(gKey) ?? {};
 
   // Bouw compact POI-object (verwijder grote/private velden)
   return {
@@ -67,8 +77,21 @@ const bundled = pois.map(poi => {
       negatives: r.negatives ?? null,
     })),
     photos: poi.photos ?? [],
-    tile: poi.tile ?? null,
-    mapy_url: poi.mapy_url ?? null,
+    // Datums parallel aan photos[] — null als onbekend (Google-foto's hebben geen datum)
+    photo_dates: (poi.photos ?? []).map((_, i) => {
+      const t = poi.photo_templates?.[i]?.take_date;
+      return t ? String(t).slice(0, 10) : null;  // "2024-07-17"
+    }),
+    // mapy_url wordt correct gezet door stap 3 (gebruikt mapy_id, niet osm_id)
+    mapy_url: poi.mapy_url ?? `https://mapy.com/en/turisticka?x=${poi.lon}&y=${poi.lat}&z=16`,
+    // Google Places (leeg als stap 3b niet gedraaid heeft of geen match)
+    google_place_id:      gData.google_place_id      ?? null,
+    google_rating:        gData.google_rating        ?? null,
+    google_total_ratings: gData.google_total_ratings ?? null,
+    google_reviews:       gData.google_reviews       ?? [],
+    google_photos:        gData.google_photos        ?? [],
+    google_phone:         gData.google_phone         ?? null,
+    google_website:       gData.google_website       ?? null,
   };
 });
 
@@ -101,7 +124,11 @@ for (const [cat, n] of Object.entries(cats)) log(`  ${cat.padEnd(20)} ${n}`);
 log('Leaflet kopiëren naar web/…');
 const leafletSrc = join(ROOT, 'node_modules', 'leaflet', 'dist');
 try {
-  copyFileSync(join(leafletSrc, 'leaflet.min.js'), join(WEB_DIR, 'leaflet.min.js'));
+  // Nieuwere Leaflet-versies bevatten geen leaflet.min.js meer — gebruik leaflet.js als fallback
+  const leafletJsSrc = existsSync(join(leafletSrc, 'leaflet.min.js'))
+    ? join(leafletSrc, 'leaflet.min.js')
+    : join(leafletSrc, 'leaflet.js');
+  copyFileSync(leafletJsSrc, join(WEB_DIR, 'leaflet.min.js'));
   copyFileSync(join(leafletSrc, 'leaflet.css'),    join(WEB_DIR, 'leaflet.css'));
   // Marker-iconen (nodig voor Leaflet CSS)
   const imgDst = join(WEB_DIR, 'images');
@@ -129,12 +156,32 @@ function latLonToTile(lat, lon, zoom) {
   return { x, y };
 }
 
-/** Geografisch middelpunt van een tile (lon, lat) */
-function tileCenter(x, y, zoom) {
+/** Converteer tile-coördinaat naar lon/lat */
+function tilePxToLonLat(tx, ty, zoom) {
   const n = Math.pow(2, zoom);
-  const lon = (x + 0.5) / n * 360 - 180;
-  const latRad = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 0.5) / n)));
+  const lon = tx / n * 360 - 180;
+  const latRad = Math.atan(Math.sinh(Math.PI * (1 - 2 * ty / n)));
   return [lon, latRad * 180 / Math.PI]; // [lon, lat]
+}
+
+/**
+ * Controleert of een tile overlapt met de zoekzone-polygon.
+ * Checkt middelpunt én alle 4 hoeken — zo worden randtiles niet gemist
+ * doordat alleen hun middelpunt buiten het polygon valt.
+ */
+function tileOverlapsPolygon(x, y, zoom, polygon) {
+  const checkPoints = [
+    [x + 0.5, y + 0.5], // middelpunt
+    [x,       y      ], // NW hoek
+    [x + 1,   y      ], // NE hoek
+    [x,       y + 1  ], // SW hoek
+    [x + 1,   y + 1  ], // SE hoek
+  ];
+  return checkPoints.some(([tx, ty]) => {
+    const [lon, lat] = tilePxToLonLat(tx, ty, zoom);
+    const pt = { type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] } };
+    return booleanPointInPolygon(pt, polygon);
+  });
 }
 
 const tileUrls = [];
@@ -146,7 +193,7 @@ const maxLon = Math.max(...routeCoords.map(c => c[0]));
 
 const zoomStats = {};
 
-for (const zoom of [12, 13, 14, 15, 16, 17]) {
+for (const zoom of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]) {
   const tMin = latLonToTile(maxLat, minLon, zoom); // NW
   const tMax = latLonToTile(minLat, maxLon, zoom); // SE
 
@@ -158,9 +205,7 @@ for (const zoom of [12, 13, 14, 15, 16, 17]) {
   for (let x = tMin.x; x <= tMax.x; x++) {
     for (let y = tMin.y; y <= tMax.y; y++) {
       if (usePolygonFilter) {
-        const [lon, lat] = tileCenter(x, y, zoom);
-        const pt = { type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] } };
-        if (!booleanPointInPolygon(pt, searchArea)) continue;
+        if (!tileOverlapsPolygon(x, y, zoom, searchArea)) continue;
       }
       const sub = ['a', 'b', 'c'][(x + y) % 3];
       tileUrls.push(`https://${sub}.tile.openstreetmap.org/${zoom}/${x}/${y}.png`);
@@ -190,7 +235,8 @@ function sanitizeTags(tags) {
   if (!tags) return {};
   // Behoud nuttige tags voor de weergave, verwijder grote/nutteloze
   const keep = ['website', 'phone', 'email', 'opening_hours', 'fee', 'drinking_water',
-                 'ele', 'operator', 'addr:city', 'capacity', 'access'];
+                 'ele', 'operator', 'addr:city', 'capacity', 'access',
+                 'tourism', 'backcountry', 'informal'];
   const result = {};
   for (const k of keep) {
     if (tags[k]) result[k] = tags[k];

@@ -58,18 +58,19 @@ await Promise.all(pois.map(poi => limit(async () => {
   }
 
   // Mapy.com Static Images API
-  // Documentatie: https://api.mapy.com/v1/docs/#tag/staticmap
-  // URL-formaat: /v1/static?apikey=...&center={lon},{lat}&zoom={z}&width={w}&height={h}&layer=basic&markers=...
+  // Documentatie: https://developer.mapy.com/rest-api-mapy-cz/function/static-maps/
+  // URL-formaat: /v1/static/map?apikey=...&lon={lon}&lat={lat}&zoom={z}&width={w}&height={h}&mapset=outdoor&markers=color:NAME;size:normal;{lon},{lat}
   const markerColor = categoryToColor(poi.category);
-  const url = new URL('https://api.mapy.com/v1/static');
+  const url = new URL('https://api.mapy.com/v1/static/map');
   url.searchParams.set('apikey', MAPY_API_KEY);
-  url.searchParams.set('center', `${poi.lon},${poi.lat}`);
+  url.searchParams.set('lon', String(poi.lon));
+  url.searchParams.set('lat', String(poi.lat));
   url.searchParams.set('zoom', String(ZOOM));
   url.searchParams.set('width', String(TILE_WIDTH));
   url.searchParams.set('height', String(TILE_HEIGHT));
-  url.searchParams.set('lang', 'en');
-  // Marker: kleur afhankelijk van categorie
-  url.searchParams.set('markers', `${poi.lon},${poi.lat},${markerColor}`);
+  url.searchParams.set('mapset', 'outdoor');  // outdoor = topokaart met wandelpaden
+  // Marker: kleur afhankelijk van categorie (named colors, niet hex)
+  url.searchParams.set('markers', `color:${markerColor};size:normal;${poi.lon},${poi.lat}`);
 
   try {
     const res = await fetchWithRetry(url.toString(), {
@@ -106,12 +107,12 @@ cacheWrite('pois-with-tiles.json', updatedPois);
 ok(`Stap 6 voltooid ✓  — ${success} nieuwe tiles, ${skipped} gecached`);
 
 function categoryToColor(category) {
-  // Mapy.com marker-kleurcodes (hex zonder #)
+  // Mapy.com named marker colors
   switch (category) {
-    case 'accommodation': return 'FF6B35'; // oranje
-    case 'water':         return '2196F3'; // blauw
-    case 'food':          return 'E91E63'; // roze
-    case 'sights':        return '4CAF50'; // groen
-    default:              return '9E9E9E'; // grijs
+    case 'accommodation': return 'orange';
+    case 'water':         return 'blue';
+    case 'food':          return 'red';
+    case 'sights':        return 'green';
+    default:              return 'grey';
   }
 }

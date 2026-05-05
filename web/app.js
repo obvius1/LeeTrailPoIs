@@ -13,11 +13,47 @@ let activeCategory = 'all';
 let searchQuery = '';
 let userLat = null, userLon = null;
 let activeView = 'list';  // 'list' | 'map'
+let _lbPhotos = [];       // {url, source} van het huidig geopend POI (voor lightbox)
+let _lbIndex  = 0;        // huidig zichtbare foto in lightbox
+let _lbScale  = 1;        // zoom-niveau in lightbox
+let _lbTransX = 0;        // horizontale verschuiving bij zoom
+let _lbTransY = 0;        // verticale verschuiving bij zoom
+let _lbSuppressClose = false; // voorkom sluiten direct na dubbeltik
 
 // Leaflet instanties
 let leafletMap = null;
 let userMarker = null;
 let poiMarkers = [];       // { marker, poi } paren
+let _detailMap = null;     // Leaflet mini-kaart in detail-venster
+
+// ── Favorieten (localStorage) ─────────────────────────────────────────────────
+
+let starredIds = new Set(JSON.parse(localStorage.getItem('peaks-starred') ?? '[]'));
+
+function starKey(osmId, osmType) { return `${osmType}-${osmId}`; }
+function isStarred(osmId, osmType) { return starredIds.has(starKey(osmId, osmType)); }
+
+function saveStarred() {
+  localStorage.setItem('peaks-starred', JSON.stringify([...starredIds]));
+}
+
+window.toggleStar = function(osmId, osmType) {
+  const key = starKey(osmId, osmType);
+  const nowStarred = !starredIds.has(key);
+  nowStarred ? starredIds.add(key) : starredIds.delete(key);
+  saveStarred();
+
+  // Update ster-knop in open detail-venster zonder alles te her-renderen
+  const btn = document.getElementById('detail-star-btn');
+  if (btn) {
+    btn.textContent = nowStarred ? '★' : '☆';
+    btn.classList.toggle('starred', nowStarred);
+    btn.title = nowStarred ? 'Verwijder uit favorieten' : 'Voeg toe aan favorieten';
+  }
+
+  // Herrender als het favorieten-filter actief is
+  if (activeCategory === 'starred') applyFilters();
+};
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -37,6 +73,10 @@ async function init() {
     applyFilters();
     setupSearch();
     setupLocate();
+    setupLightbox();
+    setupCachePrompt();
+    // Controleer hoeveel al offline gecached is (na korte delay zodat SW al actief is)
+    setTimeout(checkCacheStatus, 1500);
   } catch (err) {
     document.getElementById('loading').innerHTML =
       `<div style="text-align:center;padding:40px;color:#ff6b6b">
@@ -51,8 +91,128 @@ async function init() {
 // ── Service Worker registratie ────────────────────────────────────────────────
 
 function registerSW() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+
+  // Vraag iOS/Android om de opslag NOOIT automatisch te wissen
+  if (navigator.storage?.persist) {
+    navigator.storage.persist().then(granted => {
+      console.log('[Storage] Persistent storage:', granted ? 'toegestaan ✅' : 'niet gegarandeerd ⚠️');
+    });
+  }
+
+  // Luister naar voortgangsberichten van de SW tijdens het cachen
+  navigator.serviceWorker.addEventListener('message', event => {
+    if (event.data?.type === 'CACHE_PROGRESS') {
+      showCacheStatus(event.data.pct);
+    }
+  });
+}
+
+// ── Verbindingstype detecteren ────────────────────────────────────────────────
+
+function getConnectionType() {
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!conn) return 'unknown';
+  if (conn.saveData) return 'metered';           // data-besparingsmodus aan
+  const t = conn.type || '';
+  if (t === 'wifi' || t === 'ethernet') return 'wifi';
+  if (t === 'cellular')                 return 'cellular';
+  // effectiveType als fallback (beschikbaar op Android Chrome)
+  if (conn.effectiveType)               return 'cellular';
+  return 'unknown';
+}
+
+// ── Start grote SW-cache (foto's + tiles) ─────────────────────────────────────
+
+function startTileCaching() {
+  const sendMsg = sw => sw?.postMessage({ type: 'START_PRECACHE' });
+  if (navigator.serviceWorker.controller) {
+    sendMsg(navigator.serviceWorker.controller);
+  } else {
+    navigator.serviceWorker.ready.then(reg => sendMsg(reg.active));
+  }
+}
+
+// ── Verbindingsprompt tonen ───────────────────────────────────────────────────
+
+function showCachePrompt() {
+  const el = document.getElementById('cache-prompt');
+  if (el) el.style.display = 'flex';
+}
+
+function hideCachePrompt() {
+  const el = document.getElementById('cache-prompt');
+  if (el) el.style.display = 'none';
+}
+
+function setupCachePrompt() {
+  document.getElementById('cache-prompt-yes')?.addEventListener('click', () => {
+    hideCachePrompt();
+    startTileCaching();
+  });
+  document.getElementById('cache-prompt-no')?.addEventListener('click', () => {
+    hideCachePrompt();
+  });
+}
+
+// ── Cache-voortgang ───────────────────────────────────────────────────────────
+
+function showCacheStatus(pct) {
+  const el   = document.getElementById('cache-status');
+  const fill = document.getElementById('cache-status-fill');
+  const text = document.getElementById('cache-status-text');
+  if (!el) return;
+
+  el.style.display  = 'flex';
+  el.style.opacity  = '1';
+  fill.style.width  = `${pct}%`;
+
+  if (pct >= 100) {
+    text.textContent = '✅ Volledig offline beschikbaar';
+    el.classList.add('cache-complete');
+  } else {
+    text.textContent = `📥 Offline data: ${pct}%`;
+    el.classList.remove('cache-complete');
+  }
+}
+
+async function checkCacheStatus() {
+  if (!('caches' in window)) return;
+  try {
+    const cacheNames = await caches.keys();
+    const peaksCache = cacheNames.find(n => n.startsWith('peaks-pois-'));
+    if (!peaksCache) return;
+
+    const [tileUrls, cache] = await Promise.all([
+      fetch('/map-tiles.json').then(r => r.json()),
+      caches.open(peaksCache),
+    ]);
+    const cachedKeys = await cache.keys();
+    const cachedSet  = new Set(cachedKeys.map(r => r.url));
+
+    const total = tileUrls.length;
+    const done  = tileUrls.filter(url => cachedSet.has(url)).length;
+    const pct   = Math.round(done / total * 100);
+
+    if (pct >= 100) {
+      // Alles al gecached — toon bevestiging, geen download nodig
+      showCacheStatus(100);
+      return;
+    }
+
+    // Nog niet volledig gecached — check verbindingstype
+    const conn = getConnectionType();
+    if (conn === 'wifi') {
+      // WiFi: automatisch starten
+      showCacheStatus(pct);
+      startTileCaching();
+    } else {
+      // Mobiele data of onbekend: vraag toestemming
+      showCachePrompt();
+    }
+  } catch (_) {
+    // Stil falen — niet kritiek
   }
 }
 
@@ -95,7 +255,9 @@ function setupSearch() {
 
 function applyFilters() {
   filtered = allPois.filter(poi => {
-    if (activeCategory !== 'all' && poi.category !== activeCategory) return false;
+    if (activeCategory === 'starred') {
+      if (!isStarred(poi.osm_id, poi.osm_type)) return false;
+    } else if (activeCategory !== 'all' && poi.category !== activeCategory) return false;
     if (searchQuery) {
       const haystack = [
         poi.name,
@@ -115,6 +277,7 @@ function applyFilters() {
   // (Standaard al gesorteerd op distance_along_route_km vanuit data.json)
 
   renderList();
+  updateMapMarkers();
   document.getElementById('stats').textContent =
     `${filtered.length} van ${allPois.length} locaties${userLat ? ' — gesorteerd op afstand van jou' : ''}`;
 }
@@ -146,14 +309,17 @@ function renderList() {
       ? `<span class="stars">${starsString(poi.rating_stars)}</span> <span style="font-size:.75rem;color:var(--text2)">${poi.rating_stars.toFixed(1)} (${poi.review_count})</span>`
       : (poi.review_count > 0 ? `<span style="font-size:.75rem;color:var(--text2)">${poi.review_count} review${poi.review_count > 1 ? 's' : ''}</span>` : '');
 
+    const starBadge = isStarred(poi.osm_id, poi.osm_type)
+      ? `<span class="poi-star-badge" title="Favoriet">★</span>` : '';
+
     return `
       <div class="poi-card" onclick="openDetail(${poi.osm_id},'${poi.osm_type}')">
         <div class="poi-card-inner">
           ${thumb}
           <div class="poi-info">
-            <div class="poi-name">${esc(poi.name)}</div>
+            <div class="poi-name">${esc(poi.name)}${starBadge}</div>
             <div class="poi-meta">
-              <span class="cat-badge ${poi.category}">${categoryLabel(poi.category)}</span>
+              <span class="cat-badge ${poi.category}">${poiLabel(poi)}</span>
               <span class="poi-km">km ${poi.distance_along_route_km}</span>
               ${starsHtml}
             </div>
@@ -172,15 +338,20 @@ window.openDetail = function(osmId, osmType) {
 
   const detail = document.getElementById('detail');
 
-  // Mini-kaart
-  const tileHtml = poi.tile
-    ? `<img id="detail-tile" src="${esc(poi.tile)}" alt="Kaart van ${esc(poi.name)}" loading="eager">`
-    : `<div id="detail-tile-placeholder">📍 ${esc(poi.name)}<br><small>${poi.lat.toFixed(5)}, ${poi.lon.toFixed(5)}</small></div>`;
+  // Mini-kaart — interactief Leaflet-kaartje (vervangt statisch tile-plaatje)
+  const tileHtml = `<div id="detail-mini-map"></div>`;
 
-  // Foto-carousel
-  const photosHtml = (poi.photos ?? []).length > 0
-    ? `<div id="detail-photos">${poi.photos.map(p =>
-        `<img src="${esc(p)}" loading="lazy" alt="" onerror="this.parentNode.removeChild(this)">`
+  // Foto-carousel — combineer Mapy + Google foto's, klikbaar voor lightbox
+  _lbPhotos = [
+    ...(poi.photos ?? []).map((url, i) => ({ url, date: poi.photo_dates?.[i] ?? null, source: 'mapy' })),
+    ...(poi.google_photos ?? []).map(url => ({ url, date: null, source: 'google' })),
+  ];
+  const photosHtml = _lbPhotos.length > 0
+    ? `<div id="detail-photos">${_lbPhotos.map((p, i) =>
+        `<div class="photo-wrap${p.source === 'google' ? ' google-photo' : ''}" onclick="openLightbox(${i})">
+           <img src="${esc(p.url)}" loading="lazy" alt="" onerror="this.parentNode.style.display='none'">
+           ${p.date ? `<span class="photo-date">${formatPhotoDate(p.date)}</span>` : ''}
+         </div>`
       ).join('')}</div>`
     : '';
 
@@ -190,10 +361,32 @@ window.openDetail = function(osmId, osmType) {
 
   // Tags (website, telefoon, openingsuren, …)
   const tagEntries = Object.entries(poi.tags ?? {});
-  const tagsHtml = tagEntries.length > 0
-    ? `<div class="tag-list">${tagEntries.map(([k, v]) =>
-        `<span class="tag">${esc(tagLabel(k))}: ${esc(v)}</span>`
-      ).join('')}</div>`
+
+  // Normaliseer een telefoonnummer naar enkel cijfers voor vergelijking
+  function normalizePhone(s) { return s ? String(s).replace(/\D/g, '').slice(-9) : ''; }
+  function normalizeUrl(s)   { return s ? String(s).replace(/^https?:\/\//i,'').replace(/\/$/,'').toLowerCase() : ''; }
+
+  // Bestaande OSM-waarden
+  const osmPhone   = poi.tags?.phone ?? poi.tags?.['contact:phone'] ?? null;
+  const osmWebsite = poi.tags?.website ?? poi.tags?.['contact:website'] ?? null;
+
+  // Extra Google-tags tonen als ze niet al in OSM zitten
+  const googleExtraHtml = [
+    // Telefoon
+    poi.google_phone && normalizePhone(poi.google_phone) !== normalizePhone(osmPhone)
+      ? `<span class="tag tag-google">📞 Tel: ${esc(poi.google_phone)} <span class="tag-google-badge">G</span></span>`
+      : null,
+    // Website
+    poi.google_website && normalizeUrl(poi.google_website) !== normalizeUrl(osmWebsite)
+      ? `<span class="tag tag-google">🌐 <a href="${esc(poi.google_website)}" target="_blank" rel="noopener">${esc(poi.google_website.replace(/^https?:\/\//i,''))}</a> <span class="tag-google-badge">G</span></span>`
+      : null,
+  ].filter(Boolean).join('');
+
+  const tagsHtml = (tagEntries.length > 0 || googleExtraHtml)
+    ? `<div class="tag-list">
+        ${tagEntries.map(([k, v]) => `<span class="tag">${esc(tagLabel(k))}: ${esc(v)}</span>`).join('')}
+        ${googleExtraHtml}
+       </div>`
     : '';
 
   // Coördinaten-tag altijd tonen
@@ -202,35 +395,26 @@ window.openDetail = function(osmId, osmType) {
     <span class="tag">km ${poi.distance_along_route_km} langs route</span>
   </div>`;
 
-  // Reviews
-  const reviewCount = poi.review_count ?? poi.reviews?.length ?? 0;
-  const reviewsHtml = (poi.reviews ?? []).length > 0
-    ? `<div id="detail-reviews-title">${reviewCount} review${reviewCount !== 1 ? 's' : ''} via Mapy.cz</div>
-       ${poi.reviews.map(r => {
-         const langBadge = r.was_translated && r.lang_original
-           ? `<span style="font-size:.68rem;background:var(--bg3);padding:1px 5px;border-radius:4px;color:var(--text2)">vertaald uit ${r.lang_original.toUpperCase()}</span>`
-           : '';
-         const posNeg = (r.positives || r.negatives)
-           ? `${r.positives ? `<div style="color:#66bb6a;font-size:.82rem;margin-top:4px">👍 ${esc(r.positives)}</div>` : ''}
-              ${r.negatives ? `<div style="color:#ef5350;font-size:.82rem;margin-top:2px">👎 ${esc(r.negatives)}</div>` : ''}`
-           : '';
-         return `
-           <div class="review-card">
-             <div class="review-header">
-               <span class="review-author">${esc(r.author)} ${langBadge}</span>
-               <span class="review-date">${r.stars ? starsString(r.stars) + ' ' : ''}${r.date ? formatDate(r.date) : ''}</span>
-             </div>
-             <div class="review-english">${esc(r.text_en || r.text || '')}</div>
-             ${posNeg}
-           </div>`;
-       }).join('')}`
-    : `<p style="color:var(--text2);font-size:.85rem">Geen reviews gevonden op Mapy.cz voor deze locatie.</p>`;
+  // Reviews — tabs voor Mapy.cz en Google
+  const reviewsHtml = buildReviewsSection(poi);
 
   // Mapy.cz deeplink
-  const mapyUrl = poi.mapy_url ?? `https://mapy.com/en/place/osm-${poi.osm_type === 'node' ? 'N' : poi.osm_type === 'way' ? 'W' : 'R'}${poi.osm_id}/`;
-  const openBtn = `<a id="open-mapy-btn" href="${esc(mapyUrl)}" target="_blank" rel="noopener">
-    Open op Mapy.cz (vereist internet)
-  </a>`;
+  const mapyUrl   = poi.mapy_url ?? `https://mapy.com/en/turisticka?x=${poi.lon}&y=${poi.lat}&z=16`;
+  const googleUrl = poi.google_place_id
+    ? `https://www.google.com/maps/place/?q=place_id:${poi.google_place_id}`
+    : `https://www.google.com/maps/search/?api=1&query=${poi.lat},${poi.lon}`;
+
+  const openBtn = `
+    <div id="open-btns">
+      <a class="open-btn open-btn-mapy" href="${esc(mapyUrl)}" target="_blank" rel="noopener">
+        Open op Mapy.cz
+      </a>
+      <a class="open-btn open-btn-google" href="${esc(googleUrl)}" target="_blank" rel="noopener">
+        Open op Google Maps
+      </a>
+    </div>
+    <p class="open-btns-note">Vereist internet</p>
+  `;
 
   const starsHtml = poi.rating_stars
     ? `<span class="stars">${starsString(poi.rating_stars)}</span>
@@ -238,11 +422,18 @@ window.openDetail = function(osmId, osmType) {
        ${poi.rating_caption ? `<span style="font-size:.78rem;color:var(--accent)">${esc(poi.rating_caption)}</span>` : ''}`
     : '';
 
+  const poiStarred = isStarred(poi.osm_id, poi.osm_type);
   detail.innerHTML = `
     <div id="detail-back">
       <button onclick="closeDetail()" aria-label="Terug">‹</button>
       <h2>${esc(poi.name)}</h2>
-      <span class="cat-badge ${poi.category}">${categoryLabel(poi.category)}</span>
+      <span class="cat-badge ${poi.category}">${poiLabel(poi)}</span>
+      <button id="detail-star-btn" class="${poiStarred ? 'starred' : ''}"
+        onclick="toggleStar(${poi.osm_id},'${poi.osm_type}')"
+        title="${poiStarred ? 'Verwijder uit favorieten' : 'Voeg toe aan favorieten'}"
+        aria-label="${poiStarred ? 'Verwijder uit favorieten' : 'Voeg toe aan favorieten'}">
+        ${poiStarred ? '★' : '☆'}
+      </button>
     </div>
 
     ${tileHtml}
@@ -265,9 +456,61 @@ window.openDetail = function(osmId, osmType) {
   detail.scrollTop = 0;
   // Voorkom scroll op body
   document.body.style.overflow = 'hidden';
+
+  // ── Interactieve mini-kaart initialiseren ──
+  // Verwijder vorige instantie (als je snel tussen POIs wisselt)
+  if (_detailMap) { _detailMap.remove(); _detailMap = null; }
+
+  requestAnimationFrame(() => {
+    const miniMap = L.map('detail-mini-map', {
+      zoomControl:     true,
+      scrollWheelZoom: false,   // geen ongewenste zoom bij scrollen
+      tap:             true,    // iOS touch support
+    }).setView([poi.lat, poi.lon], 15);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom:       19,
+      maxNativeZoom: 17,   // Boven zoom 17 schalen we de tile op (offline-veilig)
+      attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
+    }).addTo(miniMap);
+
+    // GPX-route als rode lijn
+    if (window._routeData) {
+      L.geoJSON(window._routeData, {
+        style: { color: '#e8433a', weight: 3, opacity: 0.75 },
+      }).addTo(miniMap);
+    }
+
+    // POI-marker (kleur per categorie)
+    const poiColor = CAT_COLORS[poi.category] ?? '#9E9E9E';
+    L.circleMarker([poi.lat, poi.lon], {
+      radius:      10,
+      fillColor:   poiColor,
+      color:       '#fff',
+      weight:      2,
+      opacity:     1,
+      fillOpacity: 1,
+    }).addTo(miniMap);
+
+    // Eigen GPS-locatie tonen als blauwe stip (indien bekend)
+    if (userLat !== null) {
+      L.circleMarker([userLat, userLon], {
+        radius:      7,
+        fillColor:   '#4285f4',
+        color:       '#fff',
+        weight:      2,
+        opacity:     1,
+        fillOpacity: 0.9,
+      }).addTo(miniMap);
+    }
+
+    miniMap.invalidateSize();
+    _detailMap = miniMap;
+  });
 };
 
 window.closeDetail = function() {
+  if (_detailMap) { _detailMap.remove(); _detailMap = null; }
   document.getElementById('detail').classList.remove('open');
   document.body.style.overflow = '';
 };
@@ -305,17 +548,20 @@ function setupViewTabs() {
       const locateBtn = document.getElementById('locate-btn');
 
       if (activeView === 'map') {
-        listEl.style.display    = 'none';
-        statsEl.style.display   = 'none';
-        filtersEl.style.display = 'none';
-        mapView.style.display   = 'block';
-        locateBtn.style.bottom  = 'calc(var(--safe-bottom) + 20px)';
+        listEl.style.display   = 'none';
+        statsEl.style.display  = 'none';
+        mapView.style.display  = 'block';
+        locateBtn.style.bottom = 'calc(var(--safe-bottom) + 20px)';
+        // Bereken header-hoogte dynamisch zodat de kaart er naadloos onder begint,
+        // ook als de filter-chips zichtbaar blijven.
+        requestAnimationFrame(() => {
+          mapView.style.top = document.getElementById('header').offsetHeight + 'px';
+        });
         initMap();
       } else {
-        listEl.style.display    = '';
-        statsEl.style.display   = '';
-        filtersEl.style.display = '';
-        mapView.style.display   = 'none';
+        listEl.style.display  = '';
+        statsEl.style.display = '';
+        mapView.style.display = 'none';
       }
     });
   });
@@ -350,7 +596,8 @@ function initMap() {
   // OSM tiles — worden gecached door service worker na eerste gebruik
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
-    maxZoom: 18,
+    maxZoom:       19,
+    maxNativeZoom: 17,   // Boven zoom 17 schalen we de tile op (offline-veilig)
     crossOrigin: true,
   }).addTo(leafletMap);
 
@@ -367,6 +614,20 @@ function initMap() {
   if (userLat !== null) updateUserMarker(userLat, userLon);
 }
 
+/**
+ * Geeft border-kleur + dikte op basis van de sterren-score én het aantal reviews.
+ *   geen reviews (count=0 of stars null/0) → wit   (onbeoordeeld)
+ *   ≥ 4.0 sterren                          → goud  (toplocatie)
+ *   3.0–4.0 sterren                        → grijs (gemiddeld)
+ *   < 3.0 sterren                          → rood  (lage score)
+ */
+function ratingBorder(stars, reviewCount) {
+  if (!reviewCount || !stars) return { color: '#ffffff', weight: 1.5 }; // geen reviews
+  if (stars >= 4.0)           return { color: '#FFD700', weight: 2.5 }; // goud ★★★★+
+  if (stars >= 3.0)           return { color: '#9E9E9E', weight: 2.0 }; // grijs ★★★
+  return                       { color: '#EF5350', weight: 2.5 };        // rood  ★★☆
+}
+
 function updateMapMarkers() {
   if (!leafletMap) return;
 
@@ -374,18 +635,41 @@ function updateMapMarkers() {
   for (const { marker } of poiMarkers) marker.remove();
   poiMarkers = [];
 
-  // Voeg gefilterde POIs toe als circle markers
-  for (const poi of allPois) {
-    const color = CAT_COLORS[poi.category] ?? '#9E9E9E';
+  // Voeg gefilterde POIs toe als markers (zelfde filter als de lijst)
+  for (const poi of filtered) {
+    const color  = CAT_COLORS[poi.category] ?? '#9E9E9E';
+    const border = ratingBorder(poi.rating_stars, poi.review_count);
 
-    const marker = L.circleMarker([poi.lat, poi.lon], {
-      radius: 8,
-      fillColor: color,
-      color: '#fff',
-      weight: 1.5,
-      opacity: 1,
-      fillOpacity: 0.9,
-    }).addTo(leafletMap);
+    // Accommodatie → divIcon met subtype-emoji; overige → circleMarker
+    let marker;
+    if (poi.category === 'accommodation') {
+      const emoji = ACCOM_EMOJI[accomSubtype(poi)] ?? '🏕';
+      marker = L.marker([poi.lat, poi.lon], {
+        icon: L.divIcon({
+          className: '',
+          html: `<div style="
+            width:26px;height:26px;border-radius:50%;
+            background:#FF6B35;
+            display:flex;align-items:center;justify-content:center;
+            font-size:13px;line-height:1;
+            border:${border.weight}px solid ${border.color};
+            box-shadow:0 1px 4px rgba(0,0,0,.5);
+          ">${emoji}</div>`,
+          iconSize: [26, 26],
+          iconAnchor: [13, 13],
+          popupAnchor: [0, -15],
+        }),
+      }).addTo(leafletMap);
+    } else {
+      marker = L.circleMarker([poi.lat, poi.lon], {
+        radius: 8,
+        fillColor: color,
+        color: border.color,
+        weight: border.weight,
+        opacity: 1,
+        fillOpacity: 0.9,
+      }).addTo(leafletMap);
+    }
 
     const starsStr = poi.rating_stars
       ? `${'★'.repeat(Math.round(poi.rating_stars))} ${poi.rating_stars.toFixed(1)}`
@@ -394,7 +678,7 @@ function updateMapMarkers() {
     marker.bindPopup(`
       <div class="map-popup-name">${esc(poi.name)}</div>
       <div class="map-popup-meta">
-        ${categoryLabel(poi.category)} · km ${poi.distance_along_route_km}
+        ${poiLabel(poi)} · km ${poi.distance_along_route_km}
         ${starsStr ? `· ${starsStr}` : ''}
       </div>
       <button class="map-popup-btn" onclick="openDetail(${poi.osm_id},'${poi.osm_type}')">
@@ -478,6 +762,41 @@ function categoryEmoji(cat) {
   return { accommodation: '🏕', water: '💧', food: '🍽', sights: '🏔' }[cat] ?? '📍';
 }
 
+/**
+ * Leidt het slaap-subtype af uit de OSM-tag tourism=*
+ * Geen rebuild nodig — poi.tags is al beschikbaar.
+ */
+function accomSubtype(poi) {
+  const t = poi.tags?.tourism;
+  if (t === 'alpine_hut') return 'hut';
+  if (t === 'hotel')      return 'hotel';
+  if (t === 'camp_site') {
+    return (poi.tags?.backcountry === 'yes' || poi.tags?.informal === 'yes')
+      ? 'wild' : 'camping';
+  }
+  return 'guesthouse'; // guest_house, hostel, chalet
+}
+
+const ACCOM_LABELS = {
+  hut:       '🏔 Berghut',
+  camping:   '⛺ Camping',
+  wild:      '🌿 Wild kamperen',
+  guesthouse:'🏠 Guesthouse',
+  hotel:     '🏨 Hotel',
+};
+const ACCOM_EMOJI = {
+  hut: '🏔', camping: '⛺', wild: '🌿', guesthouse: '🏠', hotel: '🏨',
+};
+
+function accomLabel(poi) {
+  return ACCOM_LABELS[accomSubtype(poi)] ?? '🏕 Slaap';
+}
+
+/** Label voor lijst, kaart-popup en detail — subtype als het accommodation is, anders generiek */
+function poiLabel(poi) {
+  return poi.category === 'accommodation' ? accomLabel(poi) : categoryLabel(poi.category);
+}
+
 function tagLabel(key) {
   const map = {
     website: '🌐 Website', phone: '📞 Tel', email: '✉ Email',
@@ -505,6 +824,233 @@ function haversine(lat1, lon1, lat2, lon2) {
     Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+
+// ── Reviews-sectie met tabs ───────────────────────────────────────────────────
+
+function buildReviewsSection(poi) {
+  const hasMapy   = (poi.reviews ?? []).length > 0;
+  const hasGoogle = (poi.google_reviews ?? []).length > 0;
+
+  if (!hasMapy && !hasGoogle) {
+    return `<p style="color:var(--text2);font-size:.85rem;margin-top:8px">Geen reviews gevonden voor deze locatie.</p>`;
+  }
+
+  const showTabs = hasMapy && hasGoogle;
+
+  // ── Tab-knoppen ──
+  const tabsHtml = showTabs ? `
+    <div class="review-tabs">
+      <button class="review-tab active" data-source="mapy" onclick="switchReviewTab('mapy')">
+        📍 Mapy.cz <span class="tab-count">(${poi.review_count})</span>
+      </button>
+      <button class="review-tab" data-source="google" onclick="switchReviewTab('google')">
+        <span class="google-attr-g">G</span> Google
+        <span class="tab-count">(${poi.google_reviews.length})</span>
+      </button>
+    </div>` : '';
+
+  // ── Mapy-reviews ──
+  const mapyHtml = hasMapy ? `
+    <div id="mapy-reviews-section">
+      ${!showTabs ? `<div id="detail-reviews-title">${poi.review_count} reviews via Mapy.cz</div>` : ''}
+      ${poi.reviews.map(r => {
+        const langBadge = r.was_translated && r.lang_original
+          ? `<span style="font-size:.68rem;background:var(--bg3);padding:1px 5px;border-radius:4px;color:var(--text2)">vertaald uit ${r.lang_original.toUpperCase()}</span>`
+          : '';
+        const posNeg = (r.positives || r.negatives)
+          ? `${r.positives ? `<div style="color:#66bb6a;font-size:.82rem;margin-top:4px">👍 ${esc(r.positives)}</div>` : ''}
+             ${r.negatives ? `<div style="color:#ef5350;font-size:.82rem;margin-top:2px">👎 ${esc(r.negatives)}</div>` : ''}`
+          : '';
+        return `
+          <div class="review-card">
+            <div class="review-header">
+              <span class="review-author">${esc(r.author)} ${langBadge}</span>
+              <span class="review-date">${r.stars ? starsString(r.stars) + ' ' : ''}${r.date ? formatDate(r.date) : ''}</span>
+            </div>
+            <div class="review-english">${esc(r.text_en || r.text || '')}</div>
+            ${posNeg}
+          </div>`;
+      }).join('')}
+    </div>` : '';
+
+  // ── Google-reviews ──
+  const googleHtml = hasGoogle ? `
+    <div id="google-reviews-section"${showTabs ? ' style="display:none"' : ''}>
+      ${!showTabs ? `<div id="detail-reviews-title">${poi.google_reviews.length} reviews via Google Maps</div>` : ''}
+      <div class="google-attr">
+        <span class="google-attr-g">G</span> Reviews van Google Maps
+        ${poi.google_rating ? `· <span class="stars">${starsString(Math.round(poi.google_rating))}</span> ${poi.google_rating.toFixed(1)} (${poi.google_total_ratings ?? 0} totaal)` : ''}
+      </div>
+      ${poi.google_reviews.map(r => `
+        <div class="review-card">
+          <div class="review-header">
+            <span class="review-author">${esc(r.author)}</span>
+            <span class="review-date">${r.rating ? starsString(r.rating) + ' ' : ''}${r.relative_time ?? (r.date ? formatDate(r.date) : '')}</span>
+          </div>
+          <div class="review-english">${esc(r.text || '')}</div>
+        </div>`).join('')}
+    </div>` : '';
+
+  return tabsHtml + mapyHtml + googleHtml;
+}
+
+window.switchReviewTab = function(source) {
+  document.querySelectorAll('#detail .review-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.source === source));
+  const m = document.getElementById('mapy-reviews-section');
+  const g = document.getElementById('google-reviews-section');
+  if (m) m.style.display = source === 'mapy'   ? '' : 'none';
+  if (g) g.style.display = source === 'google' ? '' : 'none';
+};
+
+// ── Lightbox ──────────────────────────────────────────────────────────────────
+
+function setupLightbox() {
+  const lb   = document.getElementById('lightbox');
+  const prev = document.getElementById('lightbox-prev');
+  const next = document.getElementById('lightbox-next');
+
+  prev.addEventListener('click', e => { e.stopPropagation(); lbGo(_lbIndex - 1); });
+  next.addEventListener('click', e => { e.stopPropagation(); lbGo(_lbIndex + 1); });
+
+  // Tik op achtergrond → sluiten (niet als ingezoomd, niet direct na dubbeltik)
+  lb.addEventListener('click', e => {
+    if (_lbSuppressClose || _lbScale > 1) return;
+    if (e.target === lb || e.target.id === 'lightbox-img') closeLightbox();
+  });
+
+  // ── Touch: swipe, pinch-zoom, pan, dubbeltik ──────────────────────────────
+  let swipeStartX = 0;
+  let pinchStartDist = 0, pinchScaleAtStart = 1;
+  let panStartX = 0, panStartY = 0, panTxAtStart = 0, panTyAtStart = 0;
+  let lastTapTime = 0, touchMoved = false;
+
+  lb.addEventListener('touchstart', e => {
+    touchMoved = false;
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const [t1, t2] = e.touches;
+      pinchStartDist    = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      pinchScaleAtStart = _lbScale;
+    } else if (e.touches.length === 1) {
+      swipeStartX  = e.touches[0].clientX;
+      panStartX    = e.touches[0].clientX;
+      panStartY    = e.touches[0].clientY;
+      panTxAtStart = _lbTransX;
+      panTyAtStart = _lbTransY;
+    }
+  }, { passive: false });
+
+  lb.addEventListener('touchmove', e => {
+    touchMoved = true;
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const [t1, t2] = e.touches;
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      _lbScale = Math.max(1, Math.min(6, pinchScaleAtStart * dist / pinchStartDist));
+      lbApplyTransform();
+    } else if (e.touches.length === 1 && _lbScale > 1) {
+      e.preventDefault();
+      _lbTransX = panTxAtStart + (e.touches[0].clientX - panStartX) / _lbScale;
+      _lbTransY = panTyAtStart + (e.touches[0].clientY - panStartY) / _lbScale;
+      lbApplyTransform();
+    }
+  }, { passive: false });
+
+  lb.addEventListener('touchend', e => {
+    // Dubbeltik: inzoomen op 2.5× of terugzetten
+    if (!touchMoved && e.changedTouches.length === 1) {
+      const now = Date.now();
+      if (now - lastTapTime < 300) {
+        _lbSuppressClose = true;
+        setTimeout(() => { _lbSuppressClose = false; }, 150);
+        _lbScale > 1 ? lbResetZoom() : lbZoomTo(2.5);
+        lastTapTime = 0;
+        return;
+      }
+      lastTapTime = now;
+    }
+    // Swipe navigatie (alleen als niet ingezoomd)
+    if (_lbScale <= 1 && e.changedTouches.length === 1) {
+      const dx = e.changedTouches[0].clientX - swipeStartX;
+      if (dx < -50) lbGo(_lbIndex + 1);
+      if (dx >  50) lbGo(_lbIndex - 1);
+    }
+  });
+
+  // Pijltjestoetsen + Escape (handig bij desktop-test)
+  document.addEventListener('keydown', e => {
+    if (!lb.classList.contains('open')) return;
+    if (e.key === 'Escape')      closeLightbox();
+    if (e.key === 'ArrowRight')  lbGo(_lbIndex + 1);
+    if (e.key === 'ArrowLeft')   lbGo(_lbIndex - 1);
+  });
+}
+
+function lbGo(index) {
+  if (index < 0 || index >= _lbPhotos.length) return;
+  _lbIndex = index;
+  lbResetZoom();
+  lbRender();
+}
+
+function lbApplyTransform() {
+  const img = document.getElementById('lightbox-img');
+  if (img) img.style.transform = `scale(${_lbScale}) translate(${_lbTransX}px, ${_lbTransY}px)`;
+}
+
+function lbResetZoom() {
+  _lbScale = 1; _lbTransX = 0; _lbTransY = 0;
+  const img = document.getElementById('lightbox-img');
+  if (!img) return;
+  img.style.transition = 'transform .25s ease';
+  img.style.transform  = '';
+  setTimeout(() => { img.style.transition = ''; }, 260);
+}
+
+function lbZoomTo(scale) {
+  _lbScale = scale; _lbTransX = 0; _lbTransY = 0;
+  const img = document.getElementById('lightbox-img');
+  if (!img) return;
+  img.style.transition = 'transform .2s ease';
+  lbApplyTransform();
+  setTimeout(() => { img.style.transition = ''; }, 210);
+}
+
+function lbRender() {
+  const multi = _lbPhotos.length > 1;
+  const p = _lbPhotos[_lbIndex];
+  document.getElementById('lightbox-img').src = p.url;
+  document.getElementById('lightbox-counter').textContent = `${_lbIndex + 1} / ${_lbPhotos.length}`;
+  document.getElementById('lightbox-counter').classList.toggle('hidden', !multi);
+  const dateEl = document.getElementById('lightbox-date');
+  dateEl.textContent = p.date ? formatPhotoDate(p.date) : '';
+  dateEl.classList.toggle('hidden', !p.date);
+  document.getElementById('lightbox-prev').classList.toggle('hidden', _lbIndex === 0);
+  document.getElementById('lightbox-next').classList.toggle('hidden', _lbIndex === _lbPhotos.length - 1);
+}
+
+function formatPhotoDate(dateStr) {
+  if (!dateStr) return '';
+  // dateStr is "2024-07-17" (of "2024-07-17T18:54:31" — we nemen de eerste 10 tekens)
+  const [year, month, day] = dateStr.slice(0, 10).split('-').map(Number);
+  const d = new Date(year, month - 1, day);
+  return d.toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+window.openLightbox = function(index) {
+  _lbIndex = index;
+  lbRender();
+  document.getElementById('lightbox').classList.add('open');
+  document.body.style.overflow = 'hidden';
+};
+
+window.closeLightbox = function() {
+  document.getElementById('lightbox').classList.remove('open');
+  document.getElementById('lightbox-img').src = '';
+  lbResetZoom();
+  document.body.style.overflow = '';
+};
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
