@@ -19,6 +19,7 @@ let _lbScale  = 1;        // zoom-niveau in lightbox
 let _lbTransX = 0;        // horizontale verschuiving bij zoom
 let _lbTransY = 0;        // verticale verschuiving bij zoom
 let _lbSuppressClose = false; // voorkom sluiten direct na dubbeltik
+let _cachedPct = 0;           // huidig cache-percentage (voor directe balk bij 4G-goedkeuring)
 
 // Leaflet instanties
 let leafletMap = null;
@@ -149,6 +150,7 @@ function hideCachePrompt() {
 function setupCachePrompt() {
   document.getElementById('cache-prompt-yes')?.addEventListener('click', () => {
     hideCachePrompt();
+    showCacheStatus(_cachedPct); // toon balk direct, zonder te wachten op SW-bericht
     startTileCaching();
   });
   document.getElementById('cache-prompt-no')?.addEventListener('click', () => {
@@ -202,6 +204,7 @@ async function checkCacheStatus() {
     }
 
     // Nog niet volledig gecached — check verbindingstype
+    _cachedPct = pct;
     const conn = getConnectionType();
     if (conn === 'wifi') {
       // WiFi: automatisch starten
