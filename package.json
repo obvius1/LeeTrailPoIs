@@ -12,7 +12,8 @@
     "step5": "node scripts/5-translate.mjs",
     "step6": "node scripts/6-build-tiles.mjs",
     "step7": "node scripts/7-bundle.mjs",
-    "spike": "node scripts/spike-mapy-api.mjs"
+    "spike": "node scripts/spike-mapy-api.mjs",
+    "dev": "npx serve web -s"
   },
   "dependencies": {
     "@turf/along": "^7.1.0",
