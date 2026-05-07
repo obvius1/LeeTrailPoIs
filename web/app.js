@@ -771,9 +771,12 @@ function categoryEmoji(cat) {
  */
 function accomSubtype(poi) {
   const t = poi.tags?.tourism;
-  if (t === 'alpine_hut') return 'hut';
-  if (t === 'hotel')      return 'hotel';
-  if (t === 'camp_site') {
+  const a = poi.tags?.amenity;
+  if (t === 'alpine_hut')     return 'hut';
+  if (t === 'wilderness_hut') return 'wilderness';
+  if (a === 'shelter')        return 'shelter';
+  if (t === 'hotel')          return 'hotel';
+  if (t === 'camp_site' || poi.tags?.leisure === 'camp_site') {
     return (poi.tags?.backcountry === 'yes' || poi.tags?.informal === 'yes')
       ? 'wild' : 'camping';
   }
@@ -781,14 +784,16 @@ function accomSubtype(poi) {
 }
 
 const ACCOM_LABELS = {
-  hut:       '🏔 Berghut',
-  camping:   '⛺ Camping',
-  wild:      '🌿 Wild kamperen',
-  guesthouse:'🏠 Guesthouse',
-  hotel:     '🏨 Hotel',
+  hut:        '🏔 Berghut',
+  wilderness: '🛖 Onbem. hut',
+  shelter:    '🏕 Schuilplaats',
+  camping:    '⛺ Camping',
+  wild:       '🌿 Wild kamperen',
+  guesthouse: '🏠 Guesthouse',
+  hotel:      '🏨 Hotel',
 };
 const ACCOM_EMOJI = {
-  hut: '🏔', camping: '⛺', wild: '🌿', guesthouse: '🏠', hotel: '🏨',
+  hut: '🏔', wilderness: '🛖', shelter: '🏕', camping: '⛺', wild: '🌿', guesthouse: '🏠', hotel: '🏨',
 };
 
 function accomLabel(poi) {
@@ -798,7 +803,15 @@ function accomLabel(poi) {
 /** Label voor lijst, kaart-popup en detail — subtype als het accommodation is, anders generiek */
 function poiLabel(poi) {
   if (poi.category === 'accommodation') return accomLabel(poi);
+  // Sights subtypes
   if (poi.tags?.natural === 'cave_entrance') return '🕳 Grot';
+  if (poi.tags?.natural === 'hot_spring')    return '♨️ Warmwaterbron';
+  if (poi.tags?.natural === 'gorge')         return '🏞 Kloof';
+  if (poi.tags?.historic === 'ruins')        return '🏚 Ruïne';
+  // Water subtypes
+  if (poi.tags?.amenity === 'toilets')       return '🚻 Toilet';
+  // Food subtypes
+  if (poi.tags?.amenity === 'snack_bar')     return '🥪 Snackbar';
   return categoryLabel(poi.category);
 }
 

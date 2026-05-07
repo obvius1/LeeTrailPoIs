@@ -7,10 +7,10 @@
  * Output: cache/pois-raw.json
  *
  * OSM-tags die worden opgehaald:
- *   Accommodatie : tourism=camp_site, alpine_hut, guest_house, hostel, hotel
- *   Water        : natural=spring, amenity=drinking_water, amenity=water_point
- *   Eten/winkels : amenity=restaurant, cafe, fast_food, pub; shop=convenience
- *   Beziensw.    : waterway=waterfall, tourism=viewpoint, natural=peak|cave_entrance, historic=castle
+ *   Accommodatie : tourism=camp_site|alpine_hut|wilderness_hut|guest_house|hostel|chalet|hotel; leisure=camp_site; amenity=shelter
+ *   Water        : natural=spring, amenity=drinking_water|water_point|toilets
+ *   Eten/winkels : amenity=restaurant|cafe|fast_food|snack_bar|pub; shop=convenience|supermarket
+ *   Beziensw.    : waterway=waterfall, tourism=viewpoint, natural=peak|cave_entrance|hot_spring|gorge, historic=castle|ruins
  */
 
 import { readFileSync } from 'fs';
@@ -30,25 +30,31 @@ const QUERIES = [
     filter: `(
       node["tourism"="camp_site"];
       node["tourism"="alpine_hut"];
+      node["tourism"="wilderness_hut"];
       node["tourism"="guest_house"];
       node["tourism"="hostel"];
       node["tourism"="chalet"];
       node["tourism"="hotel"];
       node["leisure"="camp_site"];
+      node["amenity"="shelter"];
       way["tourism"="camp_site"];
       way["tourism"="alpine_hut"];
+      way["tourism"="wilderness_hut"];
       way["tourism"="guest_house"];
       way["tourism"="hostel"];
       way["tourism"="chalet"];
       way["tourism"="hotel"];
       way["leisure"="camp_site"];
+      way["amenity"="shelter"];
       relation["tourism"="camp_site"];
       relation["tourism"="alpine_hut"];
+      relation["tourism"="wilderness_hut"];
       relation["tourism"="guest_house"];
       relation["tourism"="hostel"];
       relation["tourism"="chalet"];
       relation["tourism"="hotel"];
       relation["leisure"="camp_site"];
+      relation["amenity"="shelter"];
     )`
   },
   {
@@ -58,6 +64,8 @@ const QUERIES = [
       node["natural"="spring"]["drinking_water"!="no"];
       node["amenity"="drinking_water"];
       node["amenity"="water_point"];
+      node["amenity"="toilets"];
+      way["amenity"="toilets"];
     )`
   },
   {
@@ -67,11 +75,13 @@ const QUERIES = [
       node["amenity"="restaurant"];
       node["amenity"="cafe"];
       node["amenity"="fast_food"];
+      node["amenity"="snack_bar"];
       node["amenity"="pub"];
       node["shop"="convenience"];
       node["shop"="supermarket"];
       way["amenity"="restaurant"];
       way["amenity"="cafe"];
+      way["amenity"="snack_bar"];
       way["shop"="supermarket"];
       relation["amenity"="restaurant"];
       relation["shop"="supermarket"];
@@ -85,14 +95,22 @@ const QUERIES = [
       node["tourism"="viewpoint"];
       node["natural"="peak"];
       node["natural"="cave_entrance"];
+      node["natural"="hot_spring"];
+      node["natural"="gorge"];
       node["historic"="castle"];
+      node["historic"="ruins"];
       node["tourism"="attraction"];
       way["waterway"="waterfall"];
       way["natural"="cave_entrance"];
+      way["natural"="hot_spring"];
+      way["natural"="gorge"];
       way["historic"="castle"];
+      way["historic"="ruins"];
       way["tourism"="attraction"];
       relation["natural"="cave_entrance"];
+      relation["natural"="gorge"];
       relation["historic"="castle"];
+      relation["historic"="ruins"];
       relation["tourism"="attraction"];
     )`
   }
