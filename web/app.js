@@ -797,7 +797,9 @@ function accomLabel(poi) {
 
 /** Label voor lijst, kaart-popup en detail — subtype als het accommodation is, anders generiek */
 function poiLabel(poi) {
-  return poi.category === 'accommodation' ? accomLabel(poi) : categoryLabel(poi.category);
+  if (poi.category === 'accommodation') return accomLabel(poi);
+  if (poi.tags?.natural === 'cave_entrance') return '🕳 Grot';
+  return categoryLabel(poi.category);
 }
 
 function tagLabel(key) {

@@ -10,7 +10,7 @@
  *   Accommodatie : tourism=camp_site, alpine_hut, guest_house, hostel, hotel
  *   Water        : natural=spring, amenity=drinking_water, amenity=water_point
  *   Eten/winkels : amenity=restaurant, cafe, fast_food, pub; shop=convenience
- *   Beziensw.    : waterway=waterfall, tourism=viewpoint, natural=peak, historic=castle
+ *   Beziensw.    : waterway=waterfall, tourism=viewpoint, natural=peak|cave_entrance, historic=castle
  */
 
 import { readFileSync } from 'fs';
@@ -34,18 +34,21 @@ const QUERIES = [
       node["tourism"="hostel"];
       node["tourism"="chalet"];
       node["tourism"="hotel"];
+      node["leisure"="camp_site"];
       way["tourism"="camp_site"];
       way["tourism"="alpine_hut"];
       way["tourism"="guest_house"];
       way["tourism"="hostel"];
       way["tourism"="chalet"];
       way["tourism"="hotel"];
+      way["leisure"="camp_site"];
       relation["tourism"="camp_site"];
       relation["tourism"="alpine_hut"];
       relation["tourism"="guest_house"];
       relation["tourism"="hostel"];
       relation["tourism"="chalet"];
       relation["tourism"="hotel"];
+      relation["leisure"="camp_site"];
     )`
   },
   {
@@ -81,11 +84,14 @@ const QUERIES = [
       node["waterway"="waterfall"];
       node["tourism"="viewpoint"];
       node["natural"="peak"];
+      node["natural"="cave_entrance"];
       node["historic"="castle"];
       node["tourism"="attraction"];
       way["waterway"="waterfall"];
+      way["natural"="cave_entrance"];
       way["historic"="castle"];
       way["tourism"="attraction"];
+      relation["natural"="cave_entrance"];
       relation["historic"="castle"];
       relation["tourism"="attraction"];
     )`
