@@ -269,6 +269,8 @@ function applyFilters() {
   filtered = allPois.filter(poi => {
     if (activeCategory === 'starred') {
       if (!isStarred(poi.osm_id, poi.osm_type)) return false;
+    } else if (activeCategory === 'noted') {
+      if (!getNote(poi.id)) return false;
     } else if (activeCategory !== 'all' && poi.category !== activeCategory) return false;
     if (searchQuery) {
       const haystack = [

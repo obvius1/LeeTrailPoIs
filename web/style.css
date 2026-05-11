@@ -111,6 +111,9 @@ body {
 /* Favorieten-chip: goudgeel */
 .chip-star { border-color: #c8962a44; color: #c8962a; }
 .chip-star.active { background: #c8962a; color: #fff; border-color: transparent; }
+/* Notities-chip: zachtgroen */
+.chip-note { border-color: #2a7a4444; color: #4caf7d; }
+.chip-note.active { background: #2a7a44; color: #fff; border-color: transparent; }
 
 /* ── Statistieken-balk ───────────────────────────────────────────────────── */
 /* ── Verbindingsprompt (mobiele data) ────────────────────────────────────── */
