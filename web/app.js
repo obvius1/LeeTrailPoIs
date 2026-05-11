@@ -192,8 +192,23 @@ function showToast(msg, isError = false) {
 }
 
 function setupShare() {
+  // ── ··· menu toggle ──
+  const moreBtn  = document.getElementById('more-btn');
+  const moreMenu = document.getElementById('more-menu');
+  moreBtn?.addEventListener('click', e => {
+    e.stopPropagation();
+    const open = !moreMenu.hidden;
+    moreMenu.hidden = open;
+    moreBtn.setAttribute('aria-expanded', String(!open));
+  });
+  document.addEventListener('click', () => {
+    if (!moreMenu.hidden) { moreMenu.hidden = true; moreBtn.setAttribute('aria-expanded', 'false'); }
+  });
+  moreMenu?.addEventListener('click', e => e.stopPropagation());
+
   // ── Exporteer ──
   document.getElementById('export-btn')?.addEventListener('click', async () => {
+    moreMenu.hidden = true; moreBtn.setAttribute('aria-expanded', 'false');
     const payload = {
       app:         'peaks-pois',
       version:     1,
@@ -221,7 +236,8 @@ function setupShare() {
   // ── Importeer ──
   document.getElementById('import-file')?.addEventListener('change', async e => {
     const file = e.target.files?.[0];
-    e.target.value = ''; // reset zodat hetzelfde bestand opnieuw geïmporteerd kan worden
+    e.target.value = '';
+    moreMenu.hidden = true; moreBtn.setAttribute('aria-expanded', 'false');
     if (!file) return;
 
     let data;

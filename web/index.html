@@ -25,7 +25,15 @@
 
   <!-- Header -->
   <header id="header">
-    <h1>⛰ Peaks <span>POIs</span></h1>
+    <div id="header-title-row">
+      <h1>⛰ Peaks <span>POIs</span></h1>
+      <button id="more-btn" aria-label="Meer opties" aria-expanded="false">···</button>
+    </div>
+    <div id="more-menu" hidden>
+      <button id="export-btn">📤 Exporteer favorieten &amp; notities</button>
+      <label id="import-lbl" for="import-file">📥 Importeer favorieten &amp; notities</label>
+      <input type="file" id="import-file" accept=".json" style="display:none">
+    </div>
 
     <!-- Zoekbalk -->
     <div id="search-wrap">
@@ -50,12 +58,6 @@
       <button class="chip chip-note" data-cat="noted">📝 Notities</button>
     </div>
 
-    <!-- Exporteer / importeer favorieten & notities -->
-    <div id="share-bar">
-      <button id="export-btn">📤 Exporteer</button>
-      <label id="import-lbl" for="import-file">📥 Importeer</label>
-      <input type="file" id="import-file" accept=".json" style="display:none">
-    </div>
   </header>
 
   <!-- Importeer-resultaat toast -->
