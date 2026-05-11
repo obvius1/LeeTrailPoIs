@@ -340,6 +340,48 @@ body {
   margin-left: 5px;
   vertical-align: middle;
 }
+/* Notitie-badge naast naam in lijstkaart */
+.poi-note-badge {
+  font-size: .8rem;
+  margin-left: 4px;
+  vertical-align: middle;
+  opacity: .75;
+}
+
+/* Notitiesectie in detail */
+#detail-notes-section {
+  margin: 20px 0 8px;
+}
+.detail-section-title {
+  font-size: .78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text2);
+  margin: 0 0 8px;
+}
+#detail-note-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg3);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: .88rem;
+  font-family: inherit;
+  line-height: 1.5;
+  padding: 10px 12px;
+  resize: vertical;
+  min-height: 72px;
+}
+#detail-note-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+#detail-note-input::placeholder {
+  color: var(--text2);
+  opacity: .55;
+}
 
 #detail-back h2 {
   font-size: 1rem;

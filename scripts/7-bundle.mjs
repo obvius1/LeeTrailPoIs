@@ -7,8 +7,9 @@
  * Output: web/data.json
  */
 
-import { writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, copyFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
+import { createHash } from 'crypto';
 import nearestPointOnLine from '@turf/nearest-point-on-line';
 import length from '@turf/length';
 import along from '@turf/along';
@@ -106,9 +107,20 @@ const output = {
 };
 
 const outPath = join(WEB_DIR, 'data.json');
-writeFileSync(outPath, JSON.stringify(output), 'utf8');
+const outJson = JSON.stringify(output);
+writeFileSync(outPath, outJson, 'utf8');
 
-const sizeKb = Math.round(JSON.stringify(output).length / 1024);
+// ── SW-versie automatisch bijwerken op basis van data.json-inhoud ─────────────
+const dataHash = createHash('sha256').update(outJson).digest('hex').slice(0, 8);
+const swPath   = join(WEB_DIR, 'sw.js');
+if (existsSync(swPath)) {
+  const swUpdated = readFileSync(swPath, 'utf8')
+    .replace(/const CACHE_VERSION = '[^']*'/, `const CACHE_VERSION = 'build-${dataHash}'`);
+  writeFileSync(swPath, swUpdated, 'utf8');
+  log(`  SW versie     : build-${dataHash}`);
+}
+
+const sizeKb = Math.round(outJson.length / 1024);
 ok(`Stap 7 voltooid ✓`);
 log(`  web/data.json : ${sizeKb} KB`);
 log(`  POIs          : ${bundled.length}`);

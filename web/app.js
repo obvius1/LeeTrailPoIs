@@ -38,6 +38,15 @@ function saveStarred() {
   localStorage.setItem('peaks-starred', JSON.stringify([...starredIds]));
 }
 
+// ── Persoonlijke notities (localStorage) ─────────────────────────────────────
+
+function getNoteKey(poiId) { return `peaks-note-${poiId}`; }
+function getNote(poiId)    { return localStorage.getItem(getNoteKey(poiId)) ?? ''; }
+function saveNote(poiId, text) {
+  if (text.trim()) localStorage.setItem(getNoteKey(poiId), text);
+  else             localStorage.removeItem(getNoteKey(poiId));
+}
+
 window.toggleStar = function(osmId, osmType) {
   const key = starKey(osmId, osmType);
   const nowStarred = !starredIds.has(key);
@@ -314,13 +323,15 @@ function renderList() {
 
     const starBadge = isStarred(poi.osm_id, poi.osm_type)
       ? `<span class="poi-star-badge" title="Favoriet">★</span>` : '';
+    const noteBadge = getNote(poi.id)
+      ? `<span class="poi-note-badge" title="Notitie">📝</span>` : '';
 
     return `
       <div class="poi-card" onclick="openDetail(${poi.osm_id},'${poi.osm_type}')">
         <div class="poi-card-inner">
           ${thumb}
           <div class="poi-info">
-            <div class="poi-name">${esc(poi.name)}${starBadge}</div>
+            <div class="poi-name">${esc(poi.name)}${starBadge}${noteBadge}</div>
             <div class="poi-meta">
               <span class="cat-badge ${poi.category}">${poiLabel(poi)}</span>
               <span class="poi-km">km ${poi.distance_along_route_km}</span>
@@ -362,8 +373,10 @@ window.openDetail = function(osmId, osmType) {
   const desc = poi.description_en || poi.description;
   const descHtml = desc ? `<p class="detail-desc">${esc(desc)}</p>` : '';
 
-  // Tags (website, telefoon, openingsuren, …)
-  const tagEntries = Object.entries(poi.tags ?? {});
+  // Tags (website, telefoon, openingsuren, …) — interne OSM-tags weggefilterd
+  const DISPLAY_TAGS = new Set(['website', 'phone', 'email', 'opening_hours', 'fee',
+    'drinking_water', 'ele', 'operator', 'addr:city', 'capacity', 'access']);
+  const tagEntries = Object.entries(poi.tags ?? {}).filter(([k]) => DISPLAY_TAGS.has(k));
 
   // Normaliseer een telefoonnummer naar enkel cijfers voor vergelijking
   function normalizePhone(s) { return s ? String(s).replace(/\D/g, '').slice(-9) : ''; }
@@ -387,7 +400,7 @@ window.openDetail = function(osmId, osmType) {
 
   const tagsHtml = (tagEntries.length > 0 || googleExtraHtml)
     ? `<div class="tag-list">
-        ${tagEntries.map(([k, v]) => `<span class="tag">${esc(tagLabel(k))}: ${esc(v)}</span>`).join('')}
+        ${tagEntries.map(([k, v]) => `<span class="tag">${esc(tagLabel(k))}: ${esc(k === 'ele' ? v + ' m' : v)}</span>`).join('')}
         ${googleExtraHtml}
        </div>`
     : '';
@@ -451,14 +464,26 @@ window.openDetail = function(osmId, osmType) {
       ${coordsHtml}
       ${reviewsHtml}
       ${openBtn}
+      <div id="detail-notes-section">
+        <h3 class="detail-section-title">📝 Mijn notitie</h3>
+        <textarea id="detail-note-input" placeholder="Persoonlijke notitie over dit POI…" rows="3"></textarea>
+      </div>
       <div style="height: calc(var(--safe-bottom) + 20px)"></div>
     </div>
   `;
 
   detail.classList.add('open');
   detail.scrollTop = 0;
-  // Voorkom scroll op body
   document.body.style.overflow = 'hidden';
+
+  // ── Notitie laden en auto-opslaan ──
+  const noteInput = document.getElementById('detail-note-input');
+  noteInput.value = getNote(poi.id);
+  let _noteTimer;
+  noteInput.addEventListener('input', () => {
+    clearTimeout(_noteTimer);
+    _noteTimer = setTimeout(() => saveNote(poi.id, noteInput.value), 400);
+  });
 
   // ── Interactieve mini-kaart initialiseren ──
   // Verwijder vorige instantie (als je snel tussen POIs wisselt)
