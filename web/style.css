@@ -120,6 +120,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  position: relative;   /* ankerpunt voor #more-menu */
 }
 #more-btn {
   background: none;
@@ -135,10 +136,15 @@ body {
 #more-btn:active,
 #more-btn[aria-expanded="true"] { background: var(--bg3); color: var(--text); }
 
+#more-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;   /* onder het menu, boven de rest */
+}
 #more-menu {
   position: absolute;
-  top: 44px;
-  right: 12px;
+  top: calc(100% + 6px);
+  right: 0;
   z-index: 200;
   background: var(--bg2);
   border: 1px solid rgba(255,255,255,.12);

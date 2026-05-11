@@ -28,12 +28,13 @@
     <div id="header-title-row">
       <h1>⛰ Peaks <span>POIs</span></h1>
       <button id="more-btn" aria-label="Meer opties" aria-expanded="false">···</button>
+      <div id="more-menu" hidden>
+        <button id="export-btn">📤 Exporteer favorieten &amp; notities</button>
+        <label id="import-lbl" for="import-file">📥 Importeer favorieten &amp; notities</label>
+        <input type="file" id="import-file" accept=".json" style="display:none">
+      </div>
     </div>
-    <div id="more-menu" hidden>
-      <button id="export-btn">📤 Exporteer favorieten &amp; notities</button>
-      <label id="import-lbl" for="import-file">📥 Importeer favorieten &amp; notities</label>
-      <input type="file" id="import-file" accept=".json" style="display:none">
-    </div>
+    <div id="more-backdrop" hidden></div>
 
     <!-- Zoekbalk -->
     <div id="search-wrap">

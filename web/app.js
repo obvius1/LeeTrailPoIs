@@ -193,22 +193,31 @@ function showToast(msg, isError = false) {
 
 function setupShare() {
   // ── ··· menu toggle ──
-  const moreBtn  = document.getElementById('more-btn');
-  const moreMenu = document.getElementById('more-menu');
+  const moreBtn      = document.getElementById('more-btn');
+  const moreMenu     = document.getElementById('more-menu');
+  const moreBackdrop = document.getElementById('more-backdrop');
+
+  function openMoreMenu() {
+    moreMenu.hidden     = false;
+    moreBackdrop.hidden = false;
+    moreBtn.setAttribute('aria-expanded', 'true');
+  }
+  function closeMoreMenu() {
+    moreMenu.hidden     = true;
+    moreBackdrop.hidden = true;
+    moreBtn.setAttribute('aria-expanded', 'false');
+  }
+
   moreBtn?.addEventListener('click', e => {
     e.stopPropagation();
-    const open = !moreMenu.hidden;
-    moreMenu.hidden = open;
-    moreBtn.setAttribute('aria-expanded', String(!open));
+    moreMenu.hidden ? openMoreMenu() : closeMoreMenu();
   });
-  document.addEventListener('click', () => {
-    if (!moreMenu.hidden) { moreMenu.hidden = true; moreBtn.setAttribute('aria-expanded', 'false'); }
-  });
-  moreMenu?.addEventListener('click', e => e.stopPropagation());
+  // Backdrop vangt tikken buiten het menu op — werkt ook op iOS Safari
+  moreBackdrop?.addEventListener('click', closeMoreMenu);
 
   // ── Exporteer ──
   document.getElementById('export-btn')?.addEventListener('click', async () => {
-    moreMenu.hidden = true; moreBtn.setAttribute('aria-expanded', 'false');
+    closeMoreMenu();
     const payload = {
       app:         'peaks-pois',
       version:     1,
@@ -237,7 +246,7 @@ function setupShare() {
   document.getElementById('import-file')?.addEventListener('change', async e => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    moreMenu.hidden = true; moreBtn.setAttribute('aria-expanded', 'false');
+    closeMoreMenu();
     if (!file) return;
 
     let data;
