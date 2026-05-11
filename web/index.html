@@ -49,7 +49,17 @@
       <button class="chip chip-star" data-cat="starred">★ Favorieten</button>
       <button class="chip chip-note" data-cat="noted">📝 Notities</button>
     </div>
+
+    <!-- Exporteer / importeer favorieten & notities -->
+    <div id="share-bar">
+      <button id="export-btn">📤 Exporteer</button>
+      <label id="import-lbl" for="import-file">📥 Importeer</label>
+      <input type="file" id="import-file" accept=".json" style="display:none">
+    </div>
   </header>
+
+  <!-- Importeer-resultaat toast -->
+  <div id="import-toast"></div>
 
   <!-- Verbindingsprompt (op mobiele data) -->
   <div id="cache-prompt" style="display:none">

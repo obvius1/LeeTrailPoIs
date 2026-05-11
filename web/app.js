@@ -85,6 +85,7 @@ async function init() {
     setupLocate();
     setupLightbox();
     setupCachePrompt();
+    setupShare();
     // Controleer hoeveel al offline gecached is (na korte delay zodat SW al actief is)
     setTimeout(checkCacheStatus, 1500);
   } catch (err) {
@@ -165,6 +166,125 @@ function setupCachePrompt() {
   document.getElementById('cache-prompt-no')?.addEventListener('click', () => {
     hideCachePrompt();
   });
+}
+
+// ── Exporteer / Importeer favorieten & notities ───────────────────────────────
+
+function getAllNotes() {
+  const notes = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith('peaks-note-')) {
+      const text = localStorage.getItem(key);
+      if (text?.trim()) notes[key.slice('peaks-note-'.length)] = text;
+    }
+  }
+  return notes;
+}
+
+function showToast(msg, isError = false) {
+  const el = document.getElementById('import-toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = isError ? 'toast-error' : 'toast-ok';
+  el.classList.add('visible');
+  setTimeout(() => el.classList.remove('visible'), 4000);
+}
+
+function setupShare() {
+  // ── Exporteer ──
+  document.getElementById('export-btn')?.addEventListener('click', async () => {
+    const payload = {
+      app:         'peaks-pois',
+      version:     1,
+      exported_at: new Date().toISOString(),
+      starred:     [...starredIds],
+      notes:       getAllNotes(),
+    };
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const date = new Date().toISOString().slice(0, 10);
+    const file = new File([blob], `peaks-pois-${date}.json`, { type: 'application/json' });
+
+    // Web Share API (iOS deelvenster → AirDrop/WhatsApp/…)
+    if (navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'Peaks POIs — Favorieten & Notities' });
+      } catch (e) {
+        if (e.name !== 'AbortError') fallbackDownload(blob, file.name);
+      }
+    } else {
+      fallbackDownload(blob, file.name);
+    }
+  });
+
+  // ── Importeer ──
+  document.getElementById('import-file')?.addEventListener('change', async e => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // reset zodat hetzelfde bestand opnieuw geïmporteerd kan worden
+    if (!file) return;
+
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch {
+      showToast('❌ Ongeldig bestand — geen geldige JSON.', true);
+      return;
+    }
+
+    if (data.app !== 'peaks-pois' || data.version !== 1) {
+      showToast('❌ Ongeldig bestand — niet van deze app.', true);
+      return;
+    }
+
+    let addedStars = 0, mergedNotes = 0;
+
+    // Favorieten samenvoegen (unie — idempotent)
+    for (const id of data.starred ?? []) {
+      if (typeof id === 'string' && !starredIds.has(id)) {
+        starredIds.add(id);
+        addedStars++;
+      }
+    }
+    if (addedStars > 0) saveStarred();
+
+    // Notities samenvoegen
+    const exportDate = data.exported_at
+      ? new Date(data.exported_at).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' })
+      : 'import';
+
+    for (const [poiId, incoming] of Object.entries(data.notes ?? {})) {
+      if (!incoming?.trim()) continue;
+      const existing = getNote(poiId);
+      if (!existing) {
+        // Nieuw — gewoon opslaan
+        saveNote(poiId, incoming.trim());
+        mergedNotes++;
+      } else if (existing.includes(incoming.trim())) {
+        // Al aanwezig (ook bij dubbel importeren) — overslaan
+      } else {
+        // Beide hebben een andere notitie — samenvoegen
+        saveNote(poiId, `${existing}\n\n— ${exportDate} —\n${incoming.trim()}`);
+        mergedNotes++;
+      }
+    }
+
+    applyFilters(); // herrender lijst (badges bijwerken)
+
+    const parts = [];
+    if (addedStars > 0)  parts.push(`${addedStars} favoriet${addedStars > 1 ? 'en' : ''} toegevoegd`);
+    if (mergedNotes > 0) parts.push(`${mergedNotes} notitie${mergedNotes > 1 ? 's' : ''} samengevoegd`);
+    showToast(parts.length ? `✅ ${parts.join(', ')}.` : '✅ Niets nieuws — alles was al aanwezig.');
+  });
+}
+
+function fallbackDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a   = document.createElement('a');
+  a.href    = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ── Cache-voortgang ───────────────────────────────────────────────────────────
