@@ -460,9 +460,12 @@ function renderList() {
       : `<div class="poi-thumb-placeholder">${categoryEmoji(poi.category)}</div>`;
 
     const topReview = poi.reviews?.[0];
-    const snippet = topReview
-      ? `"${esc((topReview.text_en || topReview.text || '').slice(0, 90))}…"`
-      : (poi.description_en || poi.description || '');
+    const note = getNote(poi.id);
+    const snippet = activeCategory === 'noted' && note
+      ? note.slice(0, 90) + (note.length > 90 ? '…' : '')
+      : topReview
+        ? `"${(topReview.text_en || topReview.text || '').slice(0, 90)}…"`
+        : (poi.description_en || poi.description || '');
 
     const starsHtml = poi.rating_stars
       ? `<span class="stars">${starsString(poi.rating_stars)}</span> <span style="font-size:.75rem;color:var(--text2)">${poi.rating_stars.toFixed(1)} (${poi.review_count})</span>`
