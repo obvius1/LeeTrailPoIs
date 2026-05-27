@@ -1,9 +1,9 @@
 {
   "name": "Peaks – Offline POI Viewer",
-  "short_name": "Peaks POIs",
-  "description": "Mapy.cz reviews offline voor de Peaks of the Balkans route",
-  "start_url": "/PoBPoIs/",
-  "scope": "/PoBPoIs/",
+  "short_name": "Lee Trail POIs",
+  "description": "Mapy.cz reviews offline voor de Lee Trail route",
+  "start_url": "/LeeTrailPoIs/",
+  "scope": "/LeeTrailPoIs/",
   "display": "standalone",
   "background_color": "#1a1a2e",
   "theme_color": "#1a1a2e",
