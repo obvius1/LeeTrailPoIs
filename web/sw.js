@@ -7,7 +7,7 @@
  *              De app controleert eerst of we op WiFi zitten.
  */
 
-const CACHE_VERSION = 'v17';
+const CACHE_VERSION = 'build-aa1816f9';
 const CACHE_NAME = `peaks-pois-${CACHE_VERSION}`;
 
 // App shell: klein, altijd gecached, ook op mobiele data
